@@ -14,3 +14,7 @@ Thumbs.db
 # Diagram tooling scratch
 *.drawio.bkp
 *.drawio.dtmp
+node_modules/
+dist/
+out/
+*.log

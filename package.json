@@ -1,0 +1,25 @@
+{
+  "name": "architecture-design",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI architectural, interior and exterior design platform with construction estimation. Desktop application.",
+  "license": "SEE LICENSE IN LICENSE",
+  "workspaces": [
+    "packages/core",
+    "packages/desktop"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @adp/core && npm run build --workspace @adp/desktop",
+    "build:core": "npm run build --workspace @adp/core",
+    "dev": "npm run dev --workspace @adp/desktop",
+    "test": "npm run test --workspace @adp/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dist": "npm run build && npm run dist --workspace @adp/desktop"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
