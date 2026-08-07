@@ -47,6 +47,38 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+/* The tab strip scrolls rather than wrapping: twelve tabs on a 1180px window
+   would otherwise push the Save button off the header. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  white-space: nowrap;
+}
+
+textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+input[type='range'] {
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
 .brand {
   font-weight: 600;
   margin-right: 20px;

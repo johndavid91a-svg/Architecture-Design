@@ -1,44 +1,87 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { allFloors, boundsOf, centroid, polygonArea, type Floor, type Project } from '@adp/core';
+import {
+  boundsOf,
+  centroid,
+  findFurniture,
+  findMaterial,
+  PAKISTAN_LOCATIONS,
+  polygonArea,
+  sunPosition,
+  type Design,
+  type Floor,
+  type Project,
+} from '@adp/core';
+import { cacheFrame, registerCanvas } from '../state/view-capture.js';
 
 interface Props {
   readonly project: Project;
+  readonly floors: readonly Floor[];
+  readonly design: Design | undefined;
 }
 
 type Mode = 'orbit' | 'walk';
 
-/** Eye height for the first-person camera. */
 const EYE_HEIGHT_MM = 1650;
 const WALK_SPEED_MM_PER_S = 3000;
 const COLLISION_RADIUS_MM = 300;
+const MM = 0.001; // millimetres to scene metres
 
 /**
- * 3D digital twin and walkthrough.
+ * 3D digital twin, walkthrough and daylight.
  *
- * The geometry is extruded directly from the architecture layer every time the
- * project changes — there is no separate 3D model to fall out of sync with the
- * plan. That is the point of a digital twin: one set of dimensions, several
- * views of it.
+ * Geometry is extruded from the architecture layer on every load — there is no
+ * separate 3D model to fall out of sync with the plan. Materials and furniture
+ * come from the design layer, so switching design options re-skins the same
+ * building rather than rebuilding it.
  *
- * Millimetres are scaled to metres for the scene (Three.js and its lighting
- * defaults assume roughly metre-scale units; a building modelled in millimetres
- * puts the camera 4,572 units from a wall and the near/far planes stop
- * behaving). The conversion happens here at the boundary and nowhere else.
+ * Millimetres are scaled to metres for the scene. Three.js lighting and its
+ * near/far defaults assume roughly metre-scale units; a building modelled in
+ * millimetres puts the camera 4,572 units from a wall and shadow bias, fog and
+ * attenuation all stop behaving. The conversion happens here and nowhere else.
  */
-export function WalkthroughView({ project }: Props): JSX.Element {
+export function WalkthroughView({ project, floors, design }: Props): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>('orbit');
   const [floorIndex, setFloorIndex] = useState(0);
+  const [showCeilings, setShowCeilings] = useState(false);
+  const [showFurniture, setShowFurniture] = useState(true);
+  const [hour, setHour] = useState(10);
+  const [month, setMonth] = useState(5);
+  const [day, setDay] = useState(21);
   const [status, setStatus] = useState('');
-  const floors = useMemo(() => allFloors(project), [project]);
+  const [sunInfo, setSunInfo] = useState('');
 
-  // Kept in refs so the animation loop reads current values without re-mounting
-  // the whole scene on every state change.
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const floorIndexRef = useRef(floorIndex);
   floorIndexRef.current = floorIndex;
+
+  // Sun state is read by the render loop each frame rather than triggering a
+  // scene rebuild, so dragging the time slider is smooth.
+  const sunRef = useRef<{ light: THREE.DirectionalLight | null; ambient: THREE.HemisphereLight | null }>({
+    light: null,
+    ambient: null,
+  });
+  const timeRef = useRef({ hour, month, day });
+  timeRef.current = { hour, month, day };
+
+  const city = project.architecture.site.location.city;
+  const location = PAKISTAN_LOCATIONS[city] ?? PAKISTAN_LOCATIONS['Islamabad']!;
+
+  const designSignature = useMemo(
+    () =>
+      design
+        ? design.floors
+            .flatMap((f) => f.rooms)
+            .map(
+              (r) =>
+                `${r.roomId}:${r.finishes.map((x) => x.surface + x.materialId).join(',')}:${r.furniture.length}`,
+            )
+            .join('|')
+        : 'none',
+    [design],
+  );
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -46,60 +89,86 @@ export function WalkthroughView({ project }: Props): JSX.Element {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0d1116);
-    scene.fog = new THREE.Fog(0x0d1116, 40, 200);
 
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.05, 500);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.05, 800);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     mount.appendChild(renderer.domElement);
+    registerCanvas('model', renderer.domElement);
 
-    // ---- Lighting -------------------------------------------------------
-    scene.add(new THREE.HemisphereLight(0xbcd4f0, 0x2a3038, 1.1));
-    const sun = new THREE.DirectionalLight(0xffe9c9, 1.8);
-    sun.position.set(30, 50, 20);
+    const ambient = new THREE.HemisphereLight(0xbcd4f0, 0x2a3038, 1.0);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffe9c9, 2.0);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -60;
-    sun.shadow.camera.right = 60;
-    sun.shadow.camera.top = 60;
-    sun.shadow.camera.bottom = -60;
+    sun.shadow.bias = -0.0004;
     scene.add(sun);
+    scene.add(sun.target);
+    sunRef.current = { light: sun, ambient };
 
-    // ---- Build the building ---------------------------------------------
-    const MM = 0.001; // millimetres to scene metres
+    // ---- Materials from the design layer ---------------------------------
+    const materialCache = new Map<string, THREE.MeshStandardMaterial>();
+    const materialFor = (
+      materialId: string | undefined,
+      fallbackHex: number,
+      side: THREE.Side = THREE.FrontSide,
+    ): THREE.MeshStandardMaterial => {
+      const key = `${materialId ?? `fallback_${fallbackHex}`}|${side}`;
+      const cached = materialCache.get(key);
+      if (cached) return cached;
+
+      const spec = materialId ? findMaterial(materialId as never) : undefined;
+      const appearance = spec?.appearance;
+      const material = new THREE.MeshStandardMaterial({
+        color: appearance ? new THREE.Color(appearance.baseColorHex) : new THREE.Color(fallbackHex),
+        roughness: appearance?.roughness ?? 0.9,
+        metalness: appearance?.metalness ?? 0,
+        side,
+      });
+      materialCache.set(key, material);
+      return material;
+    };
+
+    const designByRoom = new Map(
+      (design?.floors ?? []).flatMap((f) => f.rooms.map((r) => [r.roomId, r] as const)),
+    );
+
     const building = new THREE.Group();
     scene.add(building);
 
-    /** Walls per floor level, kept for collision tests during walkthrough. */
+    const ceilingMeshes: THREE.Mesh[] = [];
+    const furnitureMeshes: THREE.Object3D[] = [];
     const wallSegments: Array<{
       level: number;
       a: THREE.Vector2;
       b: THREE.Vector2;
       halfThickness: number;
     }> = [];
+    const allPoints: Array<{ x: number; y: number }> = [];
 
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.85 });
-    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.95 });
-    const structuralMaterial = new THREE.MeshStandardMaterial({ color: 0xb9b3a8, roughness: 0.95 });
     const glassMaterial = new THREE.MeshStandardMaterial({
       color: 0x8fc0d6,
-      roughness: 0.08,
+      roughness: 0.06,
       metalness: 0.1,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.32,
     });
     const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 0.6 });
-
-    const allPoints: Array<{ x: number; y: number }> = [];
 
     for (const floor of floors) {
       const elevation = floor.elevation * MM;
 
-      // --- Floor slabs from room polygons ---
       for (const room of floor.rooms) {
         allPoints.push(...room.boundary);
+        const rd = designByRoom.get(room.id);
+
+        // Plan Y maps to scene -Z. That flip is done ENTIRELY by the -90° X
+        // rotation below, which sends a shape point (x, y) to world (x, 0, -y).
+        // Building the shape in (x, -y) as well applied the flip twice and put
+        // every floor slab mirrored across the origin, sitting beside its own
+        // walls rather than inside them.
         const shape = new THREE.Shape();
         room.boundary.forEach((p, i) => {
           if (i === 0) shape.moveTo(p.x * MM, p.y * MM);
@@ -107,23 +176,51 @@ export function WalkthroughView({ project }: Props): JSX.Element {
         });
         shape.closePath();
 
-        const slab = new THREE.Mesh(new THREE.ShapeGeometry(shape), floorMaterial);
+        const floorFinish = rd?.finishes.find((f) => f.surface === 'floor');
+        const slab = new THREE.Mesh(
+          new THREE.ShapeGeometry(shape),
+          materialFor(floorFinish?.materialId, 0x9aa3ad),
+        );
         slab.rotation.x = -Math.PI / 2;
         slab.position.y = elevation + 0.01;
         slab.receiveShadow = true;
         building.add(slab);
 
-        // Ceiling plane, so an interior view is enclosed rather than open to sky.
+        const ceilingDrop = (rd?.ceiling.dropHeight ?? 0) * MM;
+        // Same rotation as the slab, so it lands in the same place; BackSide so
+        // it is visible from inside the room and invisible from above.
         const ceiling = new THREE.Mesh(
           new THREE.ShapeGeometry(shape),
-          new THREE.MeshStandardMaterial({ color: 0xf2f0ec, roughness: 0.95, side: THREE.BackSide }),
+          materialFor(rd?.ceiling.materialId, 0xf2f0ec, THREE.BackSide),
         );
         ceiling.rotation.x = -Math.PI / 2;
-        ceiling.position.y = elevation + room.clearHeight * MM;
+        ceiling.position.y = elevation + room.clearHeight * MM - ceilingDrop;
+        ceiling.receiveShadow = true;
+        ceilingMeshes.push(ceiling);
         building.add(ceiling);
+
+        // ---- Furniture from the design layer -----------------------------
+        for (const item of rd?.furniture ?? []) {
+          const spec = findFurniture(item.catalogueKey);
+          const colour = spec ? new THREE.Color(spec.placeholderColorHex) : new THREE.Color(0x8892a0);
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(item.width * MM, item.height * MM, item.depth * MM),
+            new THREE.MeshStandardMaterial({ color: colour, roughness: 0.7 }),
+          );
+          mesh.position.set(
+            item.position.x * MM,
+            elevation + (item.height / 2) * MM,
+            -item.position.y * MM,
+          );
+          mesh.rotation.y = -(item.rotationDeg * Math.PI) / 180;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          furnitureMeshes.push(mesh);
+          building.add(mesh);
+        }
       }
 
-      // --- Walls, with openings cut out ---
+      // ---- Walls, built as the solid pieces between openings --------------
       for (const wall of floor.walls) {
         allPoints.push(wall.start, wall.end);
         const dx = wall.end.x - wall.start.x;
@@ -140,9 +237,17 @@ export function WalkthroughView({ project }: Props): JSX.Element {
 
         const angle = Math.atan2(dy, dx);
 
-        // A wall with openings is built as the solid pieces between them —
-        // cheaper and far more robust than CSG subtraction, and it produces
-        // clean geometry for the head and sill panels above and below.
+        // A room's wall finish is applied to the walls that bound it. Where two
+        // rooms share a wall the first wins — a per-face finish needs split
+        // geometry, which is not worth the triangle count at this stage.
+        const owningRoom = floor.rooms.find((r) => r.boundingWallIds.includes(wall.id));
+        const rd = owningRoom ? designByRoom.get(owningRoom.id) : undefined;
+        const wallFinish = rd?.finishes.find((f) => f.surface === 'wall_internal' && !f.heightLimit);
+        const material = materialFor(
+          wallFinish?.materialId,
+          wall.function === 'exterior' ? 0xb9b3a8 : 0xd8d4cc,
+        );
+
         const sorted = [...wall.openings].sort((a, b) => a.distanceAlongWall - b.distanceAlongWall);
         const solids: Array<[number, number]> = [];
         let cursor = 0;
@@ -155,19 +260,19 @@ export function WalkthroughView({ project }: Props): JSX.Element {
         if (cursor < length) solids.push([cursor, length]);
 
         const addBox = (
-          fromMmAlong: number,
-          toMmAlong: number,
+          fromAlong: number,
+          toAlong: number,
           baseMm: number,
           heightMm: number,
-          material: THREE.Material,
+          mat: THREE.Material,
         ) => {
-          const segLen = toMmAlong - fromMmAlong;
+          const segLen = toAlong - fromAlong;
           if (segLen <= 1 || heightMm <= 1) return;
           const mesh = new THREE.Mesh(
             new THREE.BoxGeometry(segLen * MM, heightMm * MM, wall.thickness * MM),
-            material,
+            mat,
           );
-          const midAlong = (fromMmAlong + toMmAlong) / 2;
+          const midAlong = (fromAlong + toAlong) / 2;
           mesh.position.set(
             (wall.start.x + Math.cos(angle) * midAlong) * MM,
             elevation + (baseMm + heightMm / 2) * MM,
@@ -179,11 +284,8 @@ export function WalkthroughView({ project }: Props): JSX.Element {
           building.add(mesh);
         };
 
-        const material = wall.function === 'exterior' ? structuralMaterial : wallMaterial;
         for (const [a, b] of solids) addBox(a, b, 0, wall.height, material);
 
-        // Head panels above each opening, sill panels below windows, and the
-        // opening infill itself.
         for (const o of sorted) {
           const start = Math.max(0, o.distanceAlongWall - o.width / 2);
           const end = Math.min(length, o.distanceAlongWall + o.width / 2);
@@ -207,19 +309,18 @@ export function WalkthroughView({ project }: Props): JSX.Element {
       }
     }
 
-    // Plan Y maps to scene -Z, so the model reads north-up from above.
-    building.children.forEach((child) => {
-      if (child instanceof THREE.Mesh && child.rotation.x === -Math.PI / 2) {
-        child.scale.z = -1;
-      }
-    });
-
     // ---- Ground ----------------------------------------------------------
     const modelBounds = boundsOf(allPoints);
     const spanX = (modelBounds.maxX - modelBounds.minX) * MM;
     const spanY = (modelBounds.maxY - modelBounds.minY) * MM;
+    // The ground is sized to the shadow camera below rather than made huge.
+    // Ground extending past the shadow frustum renders fully lit, which reads as
+    // two bright wedges beside the building — a frustum edge, mistakable for
+    // geometry.
+    const siteSpan = Math.max(spanX, spanY, 12);
+    const groundSize = siteSpan * 2.2;
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(Math.max(spanX, spanY) * 4 + 60, Math.max(spanX, spanY) * 4 + 60),
+      new THREE.PlaneGeometry(groundSize, groundSize),
       new THREE.MeshStandardMaterial({ color: 0x1b2129, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
@@ -234,13 +335,24 @@ export function WalkthroughView({ project }: Props): JSX.Element {
       { x: modelBounds.minX, y: modelBounds.maxY },
     ]);
     const target = new THREE.Vector3(modelCentre.x * MM, 2, -modelCentre.y * MM);
+    ground.position.x = target.x;
+    ground.position.z = target.z;
+    sun.target.position.copy(target);
 
-    // ---- Orbit state -----------------------------------------------------
+    // Fit the shadow frustum to the ground so every lit surface is inside it.
+    const half = groundSize / 2;
+    sun.shadow.camera.left = -half;
+    sun.shadow.camera.right = half;
+    sun.shadow.camera.top = half;
+    sun.shadow.camera.bottom = -half;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = siteSpan * 8;
+    sun.shadow.camera.updateProjectionMatrix();
+
     let orbitAngle = Math.PI * 0.25;
     let orbitElevation = 0.55;
-    let orbitDistance = Math.max(spanX, spanY, 12) * 1.5;
+    let orbitDistance = Math.max(spanX, spanY, 12) * 1.6;
 
-    // ---- Walk state ------------------------------------------------------
     const walkPos = new THREE.Vector3(target.x, EYE_HEIGHT_MM * MM, target.z + 3);
     let yaw = Math.PI;
     let pitch = 0;
@@ -256,26 +368,24 @@ export function WalkthroughView({ project }: Props): JSX.Element {
     };
     applyOrbit();
 
-    // ---- Input -----------------------------------------------------------
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
 
+    const el = renderer.domElement;
     const onPointerDown = (e: PointerEvent) => {
       if (modeRef.current === 'orbit') {
         dragging = true;
         lastX = e.clientX;
         lastY = e.clientY;
-        renderer.domElement.setPointerCapture(e.pointerId);
+        el.setPointerCapture(e.pointerId);
       } else {
-        void renderer.domElement.requestPointerLock();
+        void el.requestPointerLock();
       }
     };
     const onPointerUp = (e: PointerEvent) => {
       dragging = false;
-      if (renderer.domElement.hasPointerCapture(e.pointerId)) {
-        renderer.domElement.releasePointerCapture(e.pointerId);
-      }
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     };
     const onPointerMove = (e: PointerEvent) => {
       if (modeRef.current === 'orbit') {
@@ -285,7 +395,7 @@ export function WalkthroughView({ project }: Props): JSX.Element {
         lastX = e.clientX;
         lastY = e.clientY;
         applyOrbit();
-      } else if (document.pointerLockElement === renderer.domElement) {
+      } else if (document.pointerLockElement === el) {
         yaw -= e.movementX * 0.0022;
         pitch = Math.max(-1.4, Math.min(1.4, pitch - e.movementY * 0.0022));
       }
@@ -293,13 +403,12 @@ export function WalkthroughView({ project }: Props): JSX.Element {
     const onWheel = (e: WheelEvent) => {
       if (modeRef.current !== 'orbit') return;
       e.preventDefault();
-      orbitDistance = Math.max(3, Math.min(400, orbitDistance * (1 + e.deltaY * 0.0012)));
+      orbitDistance = Math.max(3, Math.min(600, orbitDistance * (1 + e.deltaY * 0.0012)));
       applyOrbit();
     };
     const onKeyDown = (e: KeyboardEvent) => keys.add(e.code);
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
 
-    const el = renderer.domElement;
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('pointerup', onPointerUp);
     el.addEventListener('pointermove', onPointerMove);
@@ -311,8 +420,8 @@ export function WalkthroughView({ project }: Props): JSX.Element {
      * Collision: push the camera out of any wall it has entered.
      *
      * A capsule-versus-segment test rather than raycasting the mesh. It is
-     * cheap, it never tunnels through a wall at speed, and it works on the
-     * centreline data the twin already holds instead of on the render geometry.
+     * cheap, it cannot tunnel through a wall at speed, and it works on the
+     * centreline data the twin already holds instead of on render geometry.
      */
     const resolveCollisions = (position: THREE.Vector3, level: number) => {
       const p = new THREE.Vector2(position.x / MM, -position.z / MM);
@@ -336,9 +445,9 @@ export function WalkthroughView({ project }: Props): JSX.Element {
       position.z = -p.y * MM;
     };
 
-    // ---- Loop ------------------------------------------------------------
     let raf = 0;
     let previous = performance.now();
+    let sunFrame = 0;
 
     const resize = () => {
       const w = mount.clientWidth;
@@ -356,6 +465,37 @@ export function WalkthroughView({ project }: Props): JSX.Element {
       const now = performance.now();
       const dt = Math.min(0.05, (now - previous) / 1000);
       previous = now;
+
+      // Sun is recomputed a few times a second, not every frame — the position
+      // changes by fractions of a degree per minute of simulated time.
+      if (sunFrame++ % 10 === 0) {
+        const t = timeRef.current;
+        const date = new Date(2026, t.month, t.day, Math.floor(t.hour), Math.round((t.hour % 1) * 60));
+        const p = sunPosition({
+          latitude: location.latitude,
+          longitude: location.longitude,
+          utcOffsetHours: location.utcOffsetHours,
+          date,
+        });
+
+        const distance = Math.max(spanX, spanY, 40) * 2;
+        sun.position.set(
+          target.x + p.direction.x * distance,
+          Math.max(0.5, p.direction.z * distance),
+          target.z - p.direction.y * distance,
+        );
+        sun.intensity = p.isUp ? 0.4 + Math.sin((p.altitude * Math.PI) / 180) * 2.2 : 0;
+        ambient.intensity = p.isUp ? 0.7 + Math.sin((p.altitude * Math.PI) / 180) * 0.6 : 0.25;
+        // Low sun reads warmer, which is most of what makes a shadow study legible.
+        const warmth = p.isUp ? Math.max(0, 1 - p.altitude / 45) : 0;
+        sun.color.setRGB(1, 0.92 - warmth * 0.18, 0.79 - warmth * 0.32);
+
+        setSunInfo(
+          p.isUp
+            ? `Altitude ${p.altitude.toFixed(1)}°, azimuth ${p.azimuth.toFixed(0)}° — ${city}`
+            : `Sun below the horizon — ${city}`,
+        );
+      }
 
       if (modeRef.current === 'walk') {
         const floor = floors[floorIndexRef.current];
@@ -392,10 +532,22 @@ export function WalkthroughView({ project }: Props): JSX.Element {
 
     setStatus(
       `${floors.length} floor(s), ${floors.reduce((n, f) => n + f.rooms.length, 0)} rooms, ` +
-        `${floors.reduce((n, f) => n + f.walls.length, 0)} walls extruded from the twin.`,
+        `${floors.reduce((n, f) => n + f.walls.length, 0)} walls, ` +
+        `${furnitureMeshes.length} furniture item(s) from the design layer.`,
     );
 
+    // Expose the toggles to the outer component without rebuilding the scene.
+    const applyVisibility = (ceilings: boolean, furniture: boolean) => {
+      for (const m of ceilingMeshes) m.visible = ceilings;
+      for (const m of furnitureMeshes) m.visible = furniture;
+    };
+    visibilityRef.current = applyVisibility;
+    applyVisibility(showCeilings, showFurniture);
+
     return () => {
+      cacheFrame('model');
+      registerCanvas('model', null);
+      visibilityRef.current = null;
       cancelAnimationFrame(raf);
       observer.disconnect();
       el.removeEventListener('pointerdown', onPointerDown);
@@ -415,32 +567,34 @@ export function WalkthroughView({ project }: Props): JSX.Element {
       });
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [floors]);
+    // designSignature rather than `design`: a new object identity with the same
+    // content should not tear down and rebuild the whole scene.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floors, designSignature, city]);
+
+  const visibilityRef = useRef<((ceilings: boolean, furniture: boolean) => void) | null>(null);
+  useEffect(() => {
+    visibilityRef.current?.(showCeilings, showFurniture);
+  }, [showCeilings, showFurniture]);
 
   const totalArea = useMemo(
-    () =>
-      floors.reduce(
-        (sum, f: Floor) => sum + f.rooms.reduce((s, r) => s + polygonArea(r.boundary) / 92_903.04, 0),
-        0,
-      ),
+    () => floors.reduce((sum, f) => sum + f.rooms.reduce((s, r) => s + polygonArea(r.boundary) / 92_903.04, 0), 0),
     [floors],
   );
 
   return (
     <div className="viewport" ref={mountRef}>
-      <div className="overlay tl">
+      <div className="overlay tl" style={{ maxWidth: 260 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{project.name}</div>
         <div className="row" style={{ marginBottom: 8 }}>
-          <button
-            className={mode === 'orbit' ? 'primary' : 'ghost'}
-            onClick={() => setMode('orbit')}
-          >
+          <button className={mode === 'orbit' ? 'primary' : 'ghost'} onClick={() => setMode('orbit')}>
             Orbit
           </button>
           <button className={mode === 'walk' ? 'primary' : 'ghost'} onClick={() => setMode('walk')}>
             Walk
           </button>
         </div>
+
         {mode === 'walk' && (
           <>
             <label htmlFor="walk-floor">Floor</label>
@@ -457,21 +611,107 @@ export function WalkthroughView({ project }: Props): JSX.Element {
             </select>
           </>
         )}
+
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={showCeilings}
+            onChange={(e) => setShowCeilings(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          <span className="small">Show ceilings</span>
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={showFurniture}
+            onChange={(e) => setShowFurniture(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          <span className="small">Show furniture</span>
+        </label>
+
         <div className="small muted" style={{ marginTop: 8 }}>
           {mode === 'orbit' ? (
             <>Drag to orbit, scroll to zoom.</>
           ) : (
             <>
-              Click to capture the mouse, then <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> to
-              move, <kbd>Shift</kbd> to run, <kbd>Esc</kbd> to release. Walls are solid.
+              Click to capture the mouse, then <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>,{' '}
+              <kbd>Shift</kbd> to run, <kbd>Esc</kbd> to release. Walls are solid.
             </>
           )}
         </div>
       </div>
 
+      <div className="overlay tr" style={{ maxWidth: 250 }}>
+        <div className="small" style={{ fontWeight: 600, marginBottom: 8 }}>
+          Daylight
+        </div>
+        <label htmlFor="sun-hour">Time — {hour.toFixed(1).replace('.0', ':00').replace('.5', ':30')}</label>
+        <input
+          id="sun-hour"
+          type="range"
+          min={0}
+          max={23.5}
+          step={0.5}
+          value={hour}
+          onChange={(e) => setHour(Number(e.target.value))}
+        />
+        <div className="grid cols-2" style={{ marginTop: 8 }}>
+          <div>
+            <label htmlFor="sun-month">Month</label>
+            <select id="sun-month" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map(
+                (m, i) => (
+                  <option key={m} value={i}>
+                    {m}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="sun-day">Day</label>
+            <input
+              id="sun-day"
+              type="number"
+              min={1}
+              max={31}
+              value={day}
+              onChange={(e) => setDay(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
+            />
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="ghost"
+            style={{ padding: '3px 8px', fontSize: 11 }}
+            onClick={() => {
+              setMonth(5);
+              setDay(21);
+            }}
+          >
+            21 Jun
+          </button>
+          <button
+            className="ghost"
+            style={{ padding: '3px 8px', fontSize: 11 }}
+            onClick={() => {
+              setMonth(11);
+              setDay(21);
+            }}
+          >
+            21 Dec
+          </button>
+        </div>
+        <div className="small muted mono" style={{ marginTop: 8 }}>
+          {sunInfo}
+        </div>
+      </div>
+
       <div className="overlay bl">
         <div className="small mono">{totalArea.toFixed(0)} sq ft gross</div>
-        <div className="small muted" style={{ marginTop: 4, maxWidth: 320 }}>
+        <div className="small muted" style={{ marginTop: 4, maxWidth: 360 }}>
           {status}
         </div>
       </div>

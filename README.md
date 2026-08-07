@@ -10,26 +10,35 @@ building; everything is derived from the dimensions of an actual one.
 
 ## Status
 
-Foundation, running end to end. What exists is real and tested; what does not
-exist is listed plainly in [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md).
+Working end to end: **109 unit tests** over the calculation engines and **34
+end-to-end checks** driving the built application through every screen. What
+exists is real and verified; what does not is listed plainly in
+[`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md).
 
 | Working now | Not yet built |
 | --- | --- |
 | Digital twin from manual measurements | Drawing import (DXF, IFC, raster recognition) |
-| Architecture / design layer separation, enforced at runtime | AI agent calls (contracts and validators are in place) |
-| 2D plan with true wall thickness, openings, room selection | 2D editing — the plan is currently read-only |
-| 3D model extruded from the twin, orbit and first-person walkthrough with collision | Materials and furniture in 3D, daylight simulation |
-| Quantity takeoff with a derivation on every line | Multi-option design generation, before/after |
-| Estimation with material, labour, wastage, transport, contingency | Presentation export (PDF, PPTX) |
-| Provenance-tracked pricing that never fabricates a figure | Price connectors, supplier database, price history UI |
-| China landed-cost model and local-vs-import comparison | Regulation checker (CDA / RDA) |
-| BOQ generation and CSV export | Value engineering, procurement assistant |
+| Architecture / design layer separation, enforced at runtime | AI Architect, Exterior Designer and Design Director call loops |
+| Editable 2D plan: drag, resize, openings, undo/redo | Automated price connectors (blocked by network policy — see below) |
+| 3D twin with materials, furniture, daylight and shadows | Cross-project supplier database |
+| First-person walkthrough with wall collision | Quotation extraction from PDF and images |
+| Theme engine applying finishes, lighting and furniture layouts | Site context modelling, PPTX export |
+| AI Interior Designer with a validate-and-correct loop | Collaboration, VR/AR |
+| Design options with cost comparison and line-level before/after | |
+| Quantity takeoff with a derivation on every line | |
+| Estimation with material, labour, wastage, transport, contingency | |
+| Provenance-tracked pricing that never fabricates a figure | |
+| CSV price-list import, price history and trends | |
+| China landed-cost model and local-vs-import comparison | |
+| Value engineering with honest quality trade-offs | |
+| CDA / RDA regulation observations | |
+| BOQ, CSV export and a full PDF report | |
 
 ## Quick start
 
 ```bash
 npm install
-npm test          # 46 tests over the calculation engines
+npm test          # 109 tests over the calculation engines
 npm run dev       # launch the desktop app
 ```
 
@@ -49,6 +58,13 @@ deliberately. A price that cannot be sourced is reported as a gap with a remedy,
 the line stays visible in the BOQ, and the project total is presented as a floor
 rather than a total. The type system enforces this: a failed price lookup has no
 numeric field to read. See [`docs/PRICING_ENGINE.md`](docs/PRICING_ENGINE.md).
+
+**AI proposals are validated, not trusted.** A model asked to furnish a 3 m room
+will specify a 3.6 m table — reliably, because it is reasoning about what the
+room should feel like rather than whether the furniture fits. So every proposal
+is checked against the real geometry, and a failure is fed back with the exact
+measurements that failed rather than retried blindly. See
+[`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md).
 
 **Estimates say what they do not know.** Every quantity carries the rule that
 produced it. Every price carries its source, URL, retrieval date and a

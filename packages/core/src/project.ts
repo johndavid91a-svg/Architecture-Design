@@ -41,6 +41,7 @@ import {
 } from './model/ids.js';
 import type { Design } from './model/design.js';
 import { emptyDesign } from './model/design.js';
+import { recomputeBoundingWalls } from './model/edit.js';
 import { toMm } from './units.js';
 
 export interface Project {
@@ -306,13 +307,22 @@ export function createProject(spec: ProjectSpec, now: string): Project {
     location: spec.location,
   };
 
-  const architecture: ArchitectureLayer = {
+  let architecture: ArchitectureLayer = {
     projectId,
     buildingType: spec.buildingType,
     site,
     frozen: false,
     displayUnit: spec.displayUnit,
   };
+
+  // Resolve wall-to-room association from the geometry rather than trusting the
+  // ids assigned while building the strip. A shared partition bounds the rooms
+  // on both sides of it, and only a geometric test finds that. Getting it right
+  // here matters twice over: the takeoff deducts openings per room from these
+  // ids, and an edit that would move a shared wall is refused based on them.
+  for (const floor of floors) {
+    architecture = recomputeBoundingWalls(architecture, floor.id);
+  }
 
   const design = emptyDesign({
     id: newId<DesignId>('dsg'),

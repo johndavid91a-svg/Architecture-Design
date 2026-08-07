@@ -2,27 +2,37 @@
  * Electron main process.
  *
  * Security posture: the renderer runs with `nodeIntegration` off and
- * `contextIsolation` on, and reaches the filesystem only through the narrow,
- * typed surface in `preload`. That matters more here than in a typical app,
- * because a future release will parse untrusted input — uploaded drawings,
- * supplier PDFs, fetched supplier pages — and none of that should ever execute
- * with the renderer holding Node privileges.
+ * `contextIsolation` on, and reaches the filesystem, the network and the API
+ * key only through the narrow, typed surface in `preload`. That matters more
+ * here than in a typical app, because this product parses untrusted input —
+ * uploaded price lists, and in future drawings and supplier PDFs — and none of
+ * that should ever execute with the renderer holding Node privileges.
  */
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IPC, type AppInfo, type ExportRequest, type ExportResult } from '../shared/ipc.js';
+import { writeFile } from 'node:fs/promises';
+import {
+  IPC,
+  type AiCallRequest,
+  type AppInfo,
+  type ExportRequest,
+  type ExportResult,
+  type ImportResult,
+  type PdfRequest,
+} from '../shared/ipc.js';
 import { listProjects, loadProject, saveProject } from './storage.js';
+import { aiStatus, callModel, clearKeyCache, keyLocationHint } from './ai.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 700,
+    width: 1480,
+    height: 940,
+    minWidth: 1180,
+    minHeight: 720,
     show: false,
     backgroundColor: '#12161c',
     title: 'Architecture Design',
@@ -56,6 +66,33 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+/**
+ * Render an HTML document to PDF in an offscreen window.
+ *
+ * Electron's own print pipeline is used rather than a PDF library so that the
+ * exported document is the same rendering the user was shown. A separate PDF
+ * generator would be a second layout engine to keep in agreement with the
+ * first, and it would drift.
+ */
+async function renderPdf(html: string): Promise<Buffer> {
+  const worker = new BrowserWindow({
+    show: false,
+    webPreferences: { offscreen: true, javascript: false, images: true },
+  });
+  try {
+    // A data URL rather than a temporary file: nothing touches disk, and the
+    // document inherits no file:// origin it could read the filesystem from.
+    await worker.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    return await worker.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'default' },
+    });
+  } finally {
+    worker.destroy();
+  }
+}
+
 function registerHandlers(): void {
   ipcMain.handle(IPC.projectSave, async (_event, project: unknown) => saveProject(project));
   ipcMain.handle(IPC.projectLoad, async (_event, id: string) => loadProject(id));
@@ -79,13 +116,80 @@ function registerHandlers(): void {
         filters: [{ name: filterName, extensions: [extension] }],
       });
       if (result.canceled || !result.filePath) return { saved: false };
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(result.filePath, request.contents, 'utf8');
-      return { saved: true, path: result.filePath };
+      try {
+        await writeFile(result.filePath, request.contents, 'utf8');
+        return { saved: true, path: result.filePath };
+      } catch (error) {
+        return { saved: false, error: (error as Error).message };
+      }
     };
 
   ipcMain.handle(IPC.exportCsv, exportHandler('csv', 'CSV'));
   ipcMain.handle(IPC.exportJson, exportHandler('json', 'JSON'));
+
+  ipcMain.handle(
+    IPC.exportPdf,
+    async (event, request: PdfRequest): Promise<ExportResult> => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(window ?? undefined!, {
+        defaultPath: request.suggestedName,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (result.canceled || !result.filePath) return { saved: false };
+      try {
+        const pdf = await renderPdf(request.html);
+        await writeFile(result.filePath, pdf);
+        return { saved: true, path: result.filePath };
+      } catch (error) {
+        return { saved: false, error: (error as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(IPC.importCsv, async (event): Promise<ImportResult> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(window ?? undefined!, {
+      properties: ['openFile'],
+      filters: [{ name: 'Price list', extensions: ['csv', 'txt'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { cancelled: true };
+    try {
+      const path = result.filePaths[0]!;
+      const { readFile } = await import('node:fs/promises');
+      const contents = await readFile(path, 'utf8');
+      // Bounded so a mis-selected multi-gigabyte file cannot exhaust memory in
+      // the renderer that receives it.
+      if (contents.length > 8_000_000) {
+        return { cancelled: false, error: 'That file is larger than 8 MB. Split it before importing.' };
+      }
+      return { cancelled: false, filename: path, contents };
+    } catch (error) {
+      return { cancelled: false, error: (error as Error).message };
+    }
+  });
+
+  // ---- AI ---------------------------------------------------------------
+  ipcMain.handle(IPC.aiStatus, async () => aiStatus());
+
+  ipcMain.handle(IPC.aiCall, async (_event, request: AiCallRequest) => {
+    const response = await callModel(request);
+    return response.ok
+      ? { ok: true as const, text: response.text, model: response.model, stopReason: response.stopReason }
+      : { ok: false as const, reason: response.reason, detail: response.detail };
+  });
+
+  ipcMain.handle(IPC.aiSaveKey, async (_event, key: string) => {
+    try {
+      // Written to the user-data directory, never into a project document —
+      // project files get copied and emailed, and a credential inside one leaks
+      // the moment it is shared.
+      await writeFile(keyLocationHint(), String(key).trim(), { encoding: 'utf8', mode: 0o600 });
+      clearKeyCache();
+      return { saved: true };
+    } catch (error) {
+      return { saved: false, error: (error as Error).message };
+    }
+  });
 }
 
 void app.whenReady().then(() => {

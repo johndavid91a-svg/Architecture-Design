@@ -6,10 +6,13 @@ import {
   DEFAULT_SETTINGS,
   estimate,
   findMaterial,
+  importPriceCsv,
+  priceListTemplate,
   PROFESSIONAL_REVIEW_NOTICE,
   TRADE_LABELS,
   totalCaveat,
   type BudgetScenario,
+  type ImportResult,
   type MaterialId,
   type Project,
   type PriceUnit,
@@ -316,6 +319,158 @@ export function EstimateView({
   );
 }
 
+/**
+ * Price-list import.
+ *
+ * Extraction is a proposal, never a commitment. Every parsed row is shown with
+ * whatever problems were found, and nothing becomes a price record until the
+ * user presses the button. A delimiter or OCR misread of a decimal point is a
+ * 10× error in a figure someone will act on, and it is completely invisible
+ * once it is a number in a table.
+ */
+function PriceListImport({
+  priceBook,
+  onAdded,
+}: {
+  priceBook: PriceBook;
+  onAdded: () => void;
+}): JSX.Element {
+  const [parsed, setParsed] = useState<ImportResult | null>(null);
+  const [filename, setFilename] = useState('');
+  const [note, setNote] = useState('');
+
+  const load = async () => {
+    const file = await window.desktop.importCsv();
+    if (file.cancelled) return;
+    if (file.error) {
+      setNote(file.error);
+      return;
+    }
+    setFilename(file.filename ?? '');
+    setParsed(importPriceCsv(file.contents ?? '', { currency: 'PKR' }));
+    setNote('');
+  };
+
+  const commit = () => {
+    if (!parsed) return;
+    let added = 0;
+    for (const row of parsed.rows) {
+      if (!row.importable || !row.materialId || row.amount === null || !row.unit) continue;
+      priceBook.addPrice({
+        materialId: row.materialId,
+        amount: row.amount,
+        currency: row.currency,
+        unit: row.unit,
+        location: 'As supplied',
+        specification: row.specification,
+        kind: 'supplier_quote',
+        supplierName: row.supplier,
+      });
+      added++;
+    }
+    setNote(`Recorded ${added} price(s) as supplier quotations.`);
+    setParsed(null);
+    onAdded();
+  };
+
+  const downloadTemplate = async () => {
+    const out = await window.desktop.exportCsv({
+      suggestedName: 'price-list-template.csv',
+      contents: priceListTemplate(),
+    });
+    setNote(out.saved ? `Template saved to ${out.path}` : 'Cancelled.');
+  };
+
+  return (
+    <div className="card">
+      <div className="row">
+        <button className="ghost" onClick={load}>
+          Choose a CSV price list…
+        </button>
+        <button className="ghost" onClick={downloadTemplate}>
+          Download a template
+        </button>
+        {filename && <span className="small muted">{filename}</span>}
+      </div>
+
+      {note && (
+        <div className="small" style={{ marginTop: 8, color: 'var(--muted)' }}>
+          {note}
+        </div>
+      )}
+
+      {parsed && (
+        <>
+          {parsed.warnings.map((w) => (
+            <div key={w} className="notice" style={{ marginTop: 10 }}>
+              {w}
+            </div>
+          ))}
+
+          {parsed.rows.length > 0 && (
+            <>
+              <div style={{ maxHeight: 300, overflow: 'auto', marginTop: 10 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Description</th>
+                      <th>Matched material</th>
+                      <th className="num">Rate</th>
+                      <th>Unit</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsed.rows.map((r) => (
+                      <tr key={r.row} className={r.importable ? undefined : 'gap'}>
+                        <td className="muted">{r.row}</td>
+                        <td className="small">{r.rawDescription}</td>
+                        <td className="small">
+                          {r.materialId ? (
+                            <>
+                              {findMaterial(r.materialId)?.name}
+                              <span className="muted"> ({(r.matchConfidence * 100).toFixed(0)}%)</span>
+                            </>
+                          ) : (
+                            <span className="muted">no match</span>
+                          )}
+                        </td>
+                        <td className="num">{r.amount ?? '—'}</td>
+                        <td className="small">{r.unit ?? '—'}</td>
+                        <td className="small">
+                          {r.importable ? (
+                            <span className="badge high">READY</span>
+                          ) : (
+                            <span title={r.problems.join(' ')} className="badge gap">
+                              {r.problems[0]}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="row" style={{ marginTop: 10 }}>
+                <button className="primary" onClick={commit} disabled={parsed.importableCount === 0}>
+                  Record {parsed.importableCount} price(s)
+                </button>
+                <span className="small muted">
+                  {parsed.problemCount > 0
+                    ? `${parsed.problemCount} row(s) will be skipped. Fix them in the file and re-import, or enter them by hand.`
+                    : 'All rows read cleanly.'}
+                </span>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function PriceEntry({
   materials,
   trades,
@@ -373,6 +528,9 @@ function PriceEntry({
 
   return (
     <>
+      <h2>Import a price list</h2>
+      <PriceListImport priceBook={priceBook} onAdded={onAdded} />
+
       <h2>Record a price</h2>
       <p className="sub small">
         A quotation you are looking at is recorded as a supplier quote and counts as verified today.
