@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
+.env.local
+
+# Diagram tooling scratch
+*.drawio.bkp
+*.drawio.dtmp
