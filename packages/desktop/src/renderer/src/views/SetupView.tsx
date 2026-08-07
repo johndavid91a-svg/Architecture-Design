@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ImportPanel } from './ImportPanel.js';
 import {
   createProject,
   formatLength,
@@ -9,6 +10,7 @@ import {
   type RegulatoryAuthority,
   type RoomSpec,
   type RoomUse,
+  type CoreKind,
 } from '@adp/core';
 
 interface Props {
@@ -72,6 +74,8 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
     draft('Conference room', 'conference', "20'", "24'"),
   ]);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<'manual' | 'drawing'>('manual');
+  const [cores, setCores] = useState<CoreKind[]>(['stair', 'lift']);
 
   const authority: RegulatoryAuthority =
     city.trim().toLowerCase() === 'islamabad'
@@ -134,6 +138,7 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
           location: { city: city.trim(), country: 'Pakistan', authority },
           displayUnit: 'ft',
           floors,
+          cores: floorCount > 1 ? cores : [],
         },
         new Date().toISOString(),
       ),
@@ -154,6 +159,37 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
           <strong>{project.name}</strong> is open. Creating a new project replaces it in this window;
           save first if you want to keep it.
         </div>
+      )}
+
+      <div className="card">
+        <label>How do you want to start?</label>
+        <div className="row">
+          <button
+            className={mode === 'drawing' ? 'primary' : 'ghost'}
+            onClick={() => setMode('drawing')}
+          >
+            Attach an architectural drawing
+          </button>
+          <button className={mode === 'manual' ? 'primary' : 'ghost'} onClick={() => setMode('manual')}>
+            Enter measurements by hand
+          </button>
+        </div>
+        <div className="small muted" style={{ marginTop: 8 }}>
+          {mode === 'drawing'
+            ? 'Reads an IFC, DXF or vector PDF and builds the 2D plan and the 3D model from it. ' +
+              'Nothing becomes the model until you have seen what was read and what was guessed.'
+            : 'Type the rooms and their sizes. Exact from the first moment, and a good way to start ' +
+              'when there is no drawing to hand.'}
+        </div>
+      </div>
+
+      {mode === 'drawing' && (
+        <ImportPanel
+          projectName={name}
+          city={city.trim()}
+          authority={authority}
+          onCreated={onCreated}
+        />
       )}
 
       <div className="card">
@@ -216,6 +252,8 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
         </div>
       </div>
 
+      {mode === 'manual' && (
+        <>
       <h2>Rooms on each floor</h2>
       <p className="sub small">
         Accepts <span className="mono">15</span>, <span className="mono">15ft</span>,{' '}
@@ -316,6 +354,9 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
           Builds the 2D plan, the 3D model and the quantity takeoff from these dimensions.
         </span>
       </div>
+        </>
+      )}
+
     </div>
   );
 }

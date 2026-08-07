@@ -5,12 +5,16 @@ import {
   centroid,
   findFurniture,
   findMaterial,
+  landingFor,
   PAKISTAN_LOCATIONS,
   polygonArea,
   sunPosition,
+  transportNear,
+  transportPoints,
   type Design,
   type Floor,
   type Project,
+  type TransportPoint,
 } from '@adp/core';
 import { cacheFrame, registerCanvas } from '../state/view-capture.js';
 
@@ -51,6 +55,14 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const [day, setDay] = useState(21);
   const [status, setStatus] = useState('');
   const [sunInfo, setSunInfo] = useState('');
+  const [prompt, setPrompt] = useState<{ label: string; up: boolean; down: boolean } | null>(null);
+
+  const cores = useMemo(() => transportPoints(floors), [floors]);
+  const coresRef = useRef(cores);
+  coresRef.current = cores;
+
+  // Set by the render loop when the walker should be moved to another floor.
+  const teleportRef = useRef<{ level: number; at: { x: number; y: number } } | null>(null);
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -198,6 +210,61 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         ceiling.receiveShadow = true;
         ceilingMeshes.push(ceiling);
         building.add(ceiling);
+
+        // ---- Stairs, drawn as real steps ---------------------------------
+        // A box labelled "stair" is useless in a walkthrough: you cannot tell
+        // whether the flight actually fits the core or lands on the floor above.
+        // Drawing the treads from the derived riser count shows both.
+        if (room.use === 'stair') {
+          const stair = floor.stairs.find((st) => {
+            const sx = st.footprint.map((q) => q.x);
+            const rx = room.boundary.map((q) => q.x);
+            return Math.abs(Math.min(...sx) - Math.min(...rx)) < 500;
+          });
+          if (stair) {
+            const rb = boundsOf(room.boundary);
+            const count = Math.max(1, Math.round(stair.floorToFloorRise / stair.riserHeight));
+            const stepMaterial = new THREE.MeshStandardMaterial({ color: 0xa8a49c, roughness: 0.9 });
+            for (let i = 0; i < count; i++) {
+              const step = new THREE.Mesh(
+                new THREE.BoxGeometry(
+                  stair.width * MM,
+                  stair.riserHeight * MM,
+                  stair.treadDepth * MM,
+                ),
+                stepMaterial,
+              );
+              step.position.set(
+                (rb.minX + stair.width / 2) * MM,
+                elevation + (i + 0.5) * stair.riserHeight * MM,
+                -(rb.minY + 1200 + i * stair.treadDepth) * MM,
+              );
+              step.castShadow = true;
+              step.receiveShadow = true;
+              building.add(step);
+            }
+          }
+        }
+
+        // ---- Lift car, so the shaft reads as a lift ------------------------
+        if (room.use === 'lift') {
+          const rb = boundsOf(room.boundary);
+          const car = new THREE.Mesh(
+            new THREE.BoxGeometry(
+              (rb.maxX - rb.minX - 300) * MM,
+              2200 * MM,
+              (rb.maxY - rb.minY - 300) * MM,
+            ),
+            new THREE.MeshStandardMaterial({ color: 0x5b6672, roughness: 0.35, metalness: 0.5 }),
+          );
+          car.position.set(
+            ((rb.minX + rb.maxX) / 2) * MM,
+            elevation + 1100 * MM,
+            -((rb.minY + rb.maxY) / 2) * MM,
+          );
+          car.castShadow = true;
+          building.add(car);
+        }
 
         // ---- Furniture from the design layer -----------------------------
         for (const item of rd?.furniture ?? []) {
@@ -406,7 +473,28 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       orbitDistance = Math.max(3, Math.min(600, orbitDistance * (1 + e.deltaY * 0.0012)));
       applyOrbit();
     };
-    const onKeyDown = (e: KeyboardEvent) => keys.add(e.code);
+    const onKeyDown = (e: KeyboardEvent) => {
+      keys.add(e.code);
+      // E goes up, Q goes down. Handled on key-down rather than in the movement
+      // loop so a single press moves exactly one floor instead of racing up the
+      // whole building while the key is held.
+      if (modeRef.current !== 'walk') return;
+      if (e.code !== 'KeyE' && e.code !== 'KeyQ') return;
+
+      const floor = floors[floorIndexRef.current];
+      if (!floor) return;
+      const here = { x: walkPos.x / MM, y: -walkPos.z / MM };
+      const core = transportNear(here, floor.level, coresRef.current);
+      if (!core) return;
+
+      const targetLevel = core.level + (e.code === 'KeyE' ? 1 : -1);
+      const landing = landingFor(core, targetLevel, coresRef.current);
+      if (!landing) return;
+
+      const targetIndex = floors.findIndex((f) => f.level === targetLevel);
+      if (targetIndex < 0) return;
+      teleportRef.current = { level: targetIndex, at: landing.at };
+    };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
 
     el.addEventListener('pointerdown', onPointerDown);
@@ -498,6 +586,16 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       }
 
       if (modeRef.current === 'walk') {
+        // A pending floor change, requested by the E or Q key handler.
+        const jump = teleportRef.current;
+        if (jump) {
+          teleportRef.current = null;
+          setFloorIndex(jump.level);
+          floorIndexRef.current = jump.level;
+          walkPos.x = jump.at.x * MM;
+          walkPos.z = -jump.at.y * MM;
+        }
+
         const floor = floors[floorIndexRef.current];
         const elevation = (floor?.elevation ?? 0) * MM;
 
@@ -516,6 +614,20 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           resolveCollisions(walkPos, floor?.level ?? 0);
         }
         walkPos.y = elevation + EYE_HEIGHT_MM * MM;
+
+        // Offer the core the walker is standing in, and only the directions
+        // that actually lead somewhere.
+        if (sunFrame % 6 === 0) {
+          const here = { x: walkPos.x / MM, y: -walkPos.z / MM };
+          const core = transportNear(here, floor?.level ?? 0, coresRef.current);
+          if (core) {
+            const up = coresRef.current.some((p) => p.kind === core.kind && p.level === core.level + 1);
+            const down = coresRef.current.some((p) => p.kind === core.kind && p.level === core.level - 1);
+            setPrompt(up || down ? { label: core.name, up, down } : null);
+          } else {
+            setPrompt(null);
+          }
+        }
 
         camera.position.copy(walkPos);
         camera.lookAt(
@@ -595,20 +707,33 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           </button>
         </div>
 
-        {mode === 'walk' && (
+        {floors.length > 1 && (
           <>
-            <label htmlFor="walk-floor">Floor</label>
-            <select
-              id="walk-floor"
-              value={floorIndex}
-              onChange={(e) => setFloorIndex(Number(e.target.value))}
-            >
-              {floors.map((f, i) => (
-                <option key={f.id} value={i}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <label>Floor — one click</label>
+            <div className="floor-buttons">
+              {[...floors]
+                .map((f, i) => ({ f, i }))
+                .reverse()
+                .map(({ f, i }) => (
+                  <button
+                    key={f.id}
+                    className={i === floorIndex ? 'primary' : 'ghost'}
+                    onClick={() => {
+                      setFloorIndex(i);
+                      // In walk mode, land on that floor's core rather than
+                      // hanging in space wherever the previous floor left you.
+                      const core = coresRef.current.find((p) => p.level === floors[i]!.level);
+                      if (core) teleportRef.current = { level: i, at: core.at };
+                    }}
+                    title={f.purpose ?? f.name}
+                  >
+                    {f.level === 0 ? 'G' : f.level > 0 ? String(f.level) : `B${Math.abs(f.level)}`}
+                  </button>
+                ))}
+            </div>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              {floors[floorIndex]?.name}
+            </div>
           </>
         )}
 
@@ -638,6 +763,13 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             <>
               Click to capture the mouse, then <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>,{' '}
               <kbd>Shift</kbd> to run, <kbd>Esc</kbd> to release. Walls are solid.
+              {cores.length > 0 && (
+                <>
+                  {' '}
+                  Stand in a staircase or lift and press <kbd>E</kbd> to go up or <kbd>Q</kbd> to go
+                  down.
+                </>
+              )}
             </>
           )}
         </div>
@@ -708,6 +840,25 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           {sunInfo}
         </div>
       </div>
+
+      {prompt && mode === 'walk' && (
+        <div className="transport-prompt">
+          <strong>{prompt.label}</strong>
+          <div className="small" style={{ marginTop: 4 }}>
+            {prompt.up && (
+              <>
+                <kbd>E</kbd> go up
+              </>
+            )}
+            {prompt.up && prompt.down && <span className="muted"> · </span>}
+            {prompt.down && (
+              <>
+                <kbd>Q</kbd> go down
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="overlay bl">
         <div className="small mono">{totalArea.toFixed(0)} sq ft gross</div>

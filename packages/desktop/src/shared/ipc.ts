@@ -15,6 +15,7 @@ export const IPC = {
   exportJson: 'export:json',
   exportPdf: 'export:pdf',
   importCsv: 'import:csv',
+  importDrawing: 'import:drawing',
   appInfo: 'app:info',
   aiStatus: 'ai:status',
   aiCall: 'ai:call',
@@ -59,6 +60,30 @@ export interface ImportResult {
   readonly error?: string;
 }
 
+/**
+ * The result of importing a drawing.
+ *
+ * The file is parsed in the main process and the renderer receives candidates:
+ * plain data, already validated, with nothing executable in it. An uploaded
+ * drawing is untrusted input, and web-ifc needs its WebAssembly from disk,
+ * which a sandboxed renderer cannot load.
+ */
+export interface DrawingImport {
+  readonly cancelled: boolean;
+  readonly ok?: boolean;
+  readonly filename?: string;
+  readonly format?: 'pdf' | 'dxf' | 'ifc';
+  /** `CandidateFloor[]` from @adp/core, structured-cloned across the bridge. */
+  readonly floors?: unknown[];
+  readonly units?: unknown;
+  readonly issues?: unknown[];
+  readonly stats?: unknown;
+  readonly schema?: string;
+  readonly needsCalibration?: boolean;
+  readonly pageCount?: number;
+  readonly error?: string;
+}
+
 export interface AiStatus {
   readonly configured: boolean;
   readonly keyLocation: string;
@@ -83,6 +108,7 @@ export interface DesktopApi {
   exportJson(request: ExportRequest): Promise<ExportResult>;
   exportPdf(request: PdfRequest): Promise<ExportResult>;
   importCsv(): Promise<ImportResult>;
+  importDrawing(): Promise<DrawingImport>;
   appInfo(): Promise<AppInfo>;
   aiStatus(): Promise<AiStatus>;
   aiCall(request: AiCallRequest): Promise<AiCallResult>;

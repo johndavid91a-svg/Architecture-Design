@@ -374,21 +374,28 @@ export function PlanView({ store }: Props): JSX.Element {
 
       <div className="overlay tl" style={{ maxWidth: 250 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{project.name}</div>
-        <label htmlFor="floor-select">Floor</label>
-        <select
-          id="floor-select"
-          value={floorIndex}
-          onChange={(e) => {
-            setFloorIndex(Number(e.target.value));
-            setSelection({ kind: 'none' });
-          }}
-        >
-          {floors.map((f, i) => (
-            <option key={f.id} value={i}>
-              {f.name}
-            </option>
-          ))}
-        </select>
+        <label>Floor — one click</label>
+        <div className="floor-buttons">
+          {[...floors]
+            .map((f, i) => ({ f, i }))
+            .reverse()
+            .map(({ f, i }) => (
+              <button
+                key={f.id}
+                className={i === floorIndex ? 'primary' : 'ghost'}
+                onClick={() => {
+                  setFloorIndex(i);
+                  setSelection({ kind: 'none' });
+                }}
+                title={f.purpose ?? f.name}
+              >
+                {f.level === 0 ? 'G' : f.level > 0 ? String(f.level) : `B${Math.abs(f.level)}`}
+              </button>
+            ))}
+        </div>
+        <div className="small muted" style={{ marginTop: 4 }}>
+          {floor.name}
+        </div>
 
         <div className="row" style={{ marginTop: 10 }}>
           <button className="ghost" onClick={store.undo} disabled={!store.canUndo} title={store.undoLabel ?? ''}>

@@ -10,14 +10,21 @@ building; everything is derived from the dimensions of an actual one.
 
 ## Status
 
-Working end to end: **109 unit tests** over the calculation engines and **34
-end-to-end checks** driving the built application through every screen. What
-exists is real and verified; what does not is listed plainly in
+Working end to end: **127 unit tests** over the calculation engines, **96 checks**
+across six generated buildings on real Pakistani plot sizes, and an **18-step
+journey** driving the built application through every screen. The IFC importer is
+validated against **12 published reference buildings**, with imported room areas
+within **0.5% mean** of each file's own declared quantities.
+
+What exists is real and verified; what does not is listed plainly in
+[`FINAL_VALIDATION.md`](FINAL_VALIDATION.md) §4 and
 [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md).
 
 | Working now | Not yet built |
 | --- | --- |
-| Digital twin from manual measurements | Drawing import (DXF, IFC, raster recognition) |
+| Digital twin from manual measurements | PDF scale calibration UI (IFC and DXF work end to end) |
+| Drawing import from IFC and DXF, layer-aware, validated against real buildings | Raster (scanned) drawing recognition |
+| Vertical circulation: stair and lift cores as real rooms, in the takeoff | Curved-wall recognition in DXF |
 | Architecture / design layer separation, enforced at runtime | AI Architect, Exterior Designer and Design Director call loops |
 | Editable 2D plan: drag, resize, openings, undo/redo | Automated price connectors (blocked by network policy — see below) |
 | 3D twin with materials, furniture, daylight and shadows | Cross-project supplier database |
@@ -91,6 +98,9 @@ engineering input rather than filled in with a rule of thumb.
 | [USER_MANUAL.md](docs/USER_MANUAL.md) | Using the application |
 | [API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) | `@adp/core` public surface |
 | [adr/](docs/adr/) | Architecture decision records |
+| [RESOURCES_AND_SOURCES.md](RESOURCES_AND_SOURCES.md) | Every library and reference building used, with licences and why |
+| [TESTING_REPORT.md](TESTING_REPORT.md) | What was run, what it measured, and every defect found and fixed |
+| [FINAL_VALIDATION.md](FINAL_VALIDATION.md) | Readiness checklist, known limitations, and what access is still needed |
 
 ## Layout
 

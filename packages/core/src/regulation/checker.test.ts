@@ -6,7 +6,7 @@ import type { ArchitectureLayer } from '../model/architecture.js';
 
 const NOW = '2026-08-07T00:00:00.000Z';
 
-function arch(floorCount: number): ArchitectureLayer {
+function arch(floorCount: number, cores: 'none' | 'default' = 'none'): ArchitectureLayer {
   return createProject(
     {
       name: 'Reg test',
@@ -15,6 +15,9 @@ function arch(floorCount: number): ArchitectureLayer {
       displayUnit: 'ft',
       plotWidthMm: toMm(100, 'ft'),
       plotDepthMm: toMm(100, 'ft'),
+      // These tests are about the coverage arithmetic, so the generated stair
+      // and lift cores are switched off; they are exercised separately below.
+      cores: cores === 'none' ? [] : ['stair', 'lift'],
       floors: Array.from({ length: floorCount }, (_, i) => ({
         name: i === 0 ? 'Ground Floor' : `Floor ${i}`,
         level: i,
@@ -83,6 +86,17 @@ describe('regulation checker', () => {
     expect(parking?.severity).toBe('exceeds_limit');
     expect(parking?.limit).toBe(5);
     expect(parking?.measured).toBe(2);
+  });
+
+  it('counts generated stair and lift cores in the covered area', () => {
+    // A lift shaft and a staircase occupy real floor area on every storey and
+    // cost real masonry. Leaving them out of the coverage figure understates
+    // both the FAR and the build cost — a routine and expensive omission.
+    const without = computeMetrics(arch(2, 'none'));
+    const with_ = computeMetrics(arch(2, 'default'));
+
+    expect(with_.totalCoveredAreaSqft).toBeGreaterThan(without.totalCoveredAreaSqft);
+    expect(with_.far!).toBeGreaterThan(without.far!);
   });
 
   it('always carries the disclaimer', () => {

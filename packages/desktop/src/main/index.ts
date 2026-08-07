@@ -17,6 +17,7 @@ import {
   IPC,
   type AiCallRequest,
   type AppInfo,
+  type DrawingImport,
   type ExportRequest,
   type ExportResult,
   type ImportResult,
@@ -24,6 +25,7 @@ import {
 } from '../shared/ipc.js';
 import { listProjects, loadProject, saveProject } from './storage.js';
 import { aiStatus, callModel, clearKeyCache, keyLocationHint } from './ai.js';
+import { importDrawingFile } from './drawing-import.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -165,6 +167,39 @@ function registerHandlers(): void {
       return { cancelled: false, filename: path, contents };
     } catch (error) {
       return { cancelled: false, error: (error as Error).message };
+    }
+  });
+
+  ipcMain.handle(IPC.importDrawing, async (event): Promise<DrawingImport> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(window ?? undefined!, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Architectural drawing', extensions: ['ifc', 'dxf', 'pdf'] },
+        { name: 'IFC / BIM model', extensions: ['ifc'] },
+        { name: 'DXF drawing', extensions: ['dxf'] },
+        { name: 'PDF drawing', extensions: ['pdf'] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { cancelled: true };
+
+    try {
+      const payload = await importDrawingFile(result.filePaths[0]!);
+      return {
+        cancelled: false,
+        ok: payload.ok,
+        filename: payload.filename,
+        format: payload.format,
+        floors: payload.floors as unknown[],
+        units: payload.units,
+        issues: payload.issues as unknown[],
+        stats: payload.stats,
+        schema: payload.schema,
+        needsCalibration: payload.needsCalibration,
+        pageCount: payload.pageCount,
+      };
+    } catch (error) {
+      return { cancelled: false, ok: false, error: (error as Error).message };
     }
   });
 

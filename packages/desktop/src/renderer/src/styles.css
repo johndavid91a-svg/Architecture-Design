@@ -412,3 +412,33 @@ a {
   border: 1px dashed var(--line);
   border-radius: 8px;
 }
+
+/* One-click floor selector: a lift-panel row rather than a dropdown, so
+   changing floor is a single click from anywhere in the view. */
+.floor-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.floor-buttons button {
+  min-width: 34px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shown when the walker is standing in a staircase or lift. Centred low on
+   screen, where a first-person interaction prompt is looked for. */
+.transport-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  background: rgba(18, 22, 28, 0.94);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 16px;
+  text-align: center;
+  pointer-events: none;
+}

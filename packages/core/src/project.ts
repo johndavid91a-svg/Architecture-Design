@@ -42,6 +42,7 @@ import {
 import type { Design } from './model/design.js';
 import { emptyDesign } from './model/design.js';
 import { recomputeBoundingWalls } from './model/edit.js';
+import { addCores, type CoreKind, type StairCheck } from './model/circulation.js';
 import { toMm } from './units.js';
 
 export interface Project {
@@ -51,6 +52,12 @@ export interface Project {
   readonly architecture: ArchitectureLayer;
   readonly designs: readonly Design[];
   readonly activeDesignId?: DesignId;
+  /**
+   * Proportion warnings for any generated stair. Shown once at creation rather
+   * than stored on the twin, because they describe how the stair was derived,
+   * not what it is.
+   */
+  readonly stairChecks?: readonly StairCheck[];
 }
 
 /** One room as the user enters it: a name, a use, and two dimensions. */
@@ -267,6 +274,11 @@ export interface ProjectSpec {
   readonly plotWidthMm?: number;
   readonly plotDepthMm?: number;
   readonly floors: readonly FloorSpec[];
+  /**
+   * Vertical circulation to generate. Ignored for a single-floor building,
+   * which needs none.
+   */
+  readonly cores?: readonly CoreKind[];
 }
 
 export function createProject(spec: ProjectSpec, now: string): Project {
@@ -274,7 +286,14 @@ export function createProject(spec: ProjectSpec, now: string): Project {
   const siteId = newId<SiteId>('sit');
   const buildingId = newId<BuildingId>('bld');
 
-  const floors = spec.floors.map((f) => buildFloorFromRooms(f, buildingId));
+  const baseFloors = spec.floors.map((f) => buildFloorFromRooms(f, buildingId));
+
+  // Stair and lift cores are real rooms with real walls, so they carry into the
+  // takeoff. A lift shaft is four walls of masonry on every floor, which is a
+  // cost people routinely forget to include.
+  const cored = addCores(baseFloors, spec.cores ?? (baseFloors.length > 1 ? ['stair', 'lift'] : []));
+  const floors = cored.floors;
+  const stairChecks: readonly StairCheck[] = cored.checks;
 
   // Footprint from the largest floor's extent.
   const extents = floors.map((f) => {
@@ -341,6 +360,7 @@ export function createProject(spec: ProjectSpec, now: string): Project {
     architecture,
     designs: [design],
     activeDesignId: design.id,
+    stairChecks,
   };
 }
 

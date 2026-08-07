@@ -168,7 +168,16 @@ export function formatLength(mm: Millimetres, unit: LengthUnit, opts: { imperial
     const remEighths = eighths - feet * 96;
     const inches = Math.floor(remEighths / 8);
     const frac = remEighths - inches * 8;
-    const fracStr = frac === 0 ? '' : ` ${frac}/8`;
+    // Reduce the fraction to lowest terms. A drawing that says 11 2/8" instead
+    // of 11 1/4" reads as machine output rather than a dimension, and on a
+    // dimension string that is exactly the wrong impression to give.
+    let numerator = frac;
+    let denominator = 8;
+    while (numerator !== 0 && numerator % 2 === 0) {
+      numerator /= 2;
+      denominator /= 2;
+    }
+    const fracStr = frac === 0 ? '' : ` ${numerator}/${denominator}`;
     return `${sign}${feet}' ${inches}${fracStr}"`;
   }
   const v = fromMm(mm, unit);

@@ -41,4 +41,15 @@ describe('units', () => {
     expect(formatLength(4572, 'ft', { imperialInches: true })).toBe("15' 0\"");
     expect(formatLength(4724.4, 'ft', { imperialInches: true })).toBe("15' 6\"");
   });
+
+  it('reduces inch fractions to lowest terms', () => {
+    // A dimension that reads 11 2/8" instead of 11 1/4" is machine output, not
+    // a drawing, and dimension strings are where that impression costs most.
+    expect(formatLength(toMm(11.25, 'in'), 'ft', { imperialInches: true })).toBe("0' 11 1/4\"");
+    expect(formatLength(toMm(11.5, 'in'), 'ft', { imperialInches: true })).toBe("0' 11 1/2\"");
+    expect(formatLength(toMm(0.75, 'in'), 'ft', { imperialInches: true })).toBe("0' 0 3/4\"");
+    // An eighth is already in lowest terms and must be left alone.
+    expect(formatLength(toMm(3.125, 'in'), 'ft', { imperialInches: true })).toBe("0' 3 1/8\"");
+    expect(formatLength(toMm(3.375, 'in'), 'ft', { imperialInches: true })).toBe("0' 3 3/8\"");
+  });
 });

@@ -28,6 +28,7 @@ const api: DesktopApi = {
   exportJson: (request: ExportRequest) => ipcRenderer.invoke(IPC.exportJson, request),
   exportPdf: (request: PdfRequest) => ipcRenderer.invoke(IPC.exportPdf, request),
   importCsv: () => ipcRenderer.invoke(IPC.importCsv),
+  importDrawing: () => ipcRenderer.invoke(IPC.importDrawing),
   appInfo: () => ipcRenderer.invoke(IPC.appInfo),
   aiStatus: () => ipcRenderer.invoke(IPC.aiStatus),
   aiCall: (request: AiCallRequest) => ipcRenderer.invoke(IPC.aiCall, request),

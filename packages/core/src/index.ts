@@ -15,6 +15,7 @@ export * from './model/design.js';
 export * from './model/guard.js';
 export * from './model/edit.js';
 export * from './model/history.js';
+export * from './model/circulation.js';
 
 export * from './catalogue/materials.js';
 export * from './catalogue/furniture.js';
@@ -46,5 +47,12 @@ export * from './boq/report.js';
 
 export * from './ai/contracts.js';
 export * from './ai/agents.js';
+
+export * from './import/contract.js';
+export * from './import/materialise.js';
+export * from './import/ifc.js';
+export * from './import/recognise.js';
+export * from './import/dxf.js';
+export * from './import/pdf.js';
 
 export * from './project.js';
