@@ -2,7 +2,7 @@
   "name": "@adp/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron desktop application shell and renderer.",
+  "description": "Architectural digital twin, design and construction estimation.",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -37,16 +37,11 @@
         "deb"
       ],
       "icon": "build/icons",
-      "category": "Graphics",
+      "category": "Graphics;Science;Engineering;",
       "synopsis": "Architectural digital twin, design and construction estimation",
-      "desktop": {
-        "entry": {
-          "Name": "Architecture Design",
-          "Comment": "Digital twin, design and construction estimation",
-          "Categories": "Graphics;Engineering;Science;"
-        }
-      },
-      "executableName": "architecture-design"
+      "executableName": "architecture-design",
+      "syncDesktopName": true,
+      "maintainer": "Architecture Design <noreply@architecturedesign.pk>"
     },
     "win": {
       "target": [
@@ -69,7 +64,8 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.graphics-design"
-    }
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "dependencies": {
     "@adp/core": "*"
@@ -89,9 +85,13 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   },
-  "author": "Architecture Design",
+  "author": {
+    "name": "Architecture Design",
+    "email": "noreply@architecturedesign.pk"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/johndavid91a-svg/Architecture-Design"
-  }
+  },
+  "desktopName": "architecture-design.desktop"
 }

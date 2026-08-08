@@ -107,9 +107,13 @@ function installLinux() {
     `Icon=${icon}`,
     `Path=${repo}`,
     'Terminal=false',
-    'Categories=Graphics;Engineering;Science;',
+    'Categories=Graphics;Science;Engineering;',
     'StartupNotify=true',
-    `StartupWMClass=${APP_NAME}`,
+    // Must match the app's WM_CLASS, which comes from `desktopName` in the
+    // desktop package. Get it wrong and the running window does not associate
+    // with this entry: the task bar shows a generic placeholder beside the
+    // launcher instead of the application's own icon.
+    'StartupWMClass=architecture-design',
     '',
   ].join('\n');
 

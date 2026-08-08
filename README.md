@@ -53,20 +53,39 @@ Node 20.19+ required. Full instructions in [`docs/SETUP.md`](docs/SETUP.md).
 
 ### A desktop icon instead of a command
 
+Double-click one file in this folder. No terminal, nothing to remember:
+
+| You are on | Double-click |
+| --- | --- |
+| Windows | **`Install Desktop Icon.bat`** |
+| macOS or Linux | **`Install Desktop Icon.command`** |
+
+It installs the dependencies, builds a standalone application, and puts
+**Architecture Design** on your desktop and in your applications menu. The first
+run takes a few minutes because it downloads Electron; after that it is seconds.
+The only prerequisite is [Node.js](https://nodejs.org) 20.19 or later — it says
+so plainly and stops if it is missing.
+
+If packaging fails for any reason, it does not give up: the icon it creates
+starts the project directly instead. Slower to open, but it works.
+
+The same thing from a terminal, if you prefer:
+
+```bash
+node tools/setup-desktop.mjs   # everything, in one go
+```
+
+or step by step:
+
 ```bash
 npm run dist          # build a real installable application
 npm run desktop-icon  # put it on the desktop and in the applications menu
 ```
 
-`npm run dist` produces an installer for whatever machine you run it on — an
-`.exe` on Windows, a `.dmg` on macOS, an `AppImage` and `.deb` on Linux — under
-`packages/desktop/release/`. On Windows the installer creates the desktop and
-Start-menu shortcuts itself, so `desktop-icon` is only needed on Linux, or
-before packaging.
-
-Run `desktop-icon` without packaging first and it still works: the shortcut
-starts the project through `npm run dev` instead. Slower, and it needs Node on
-the PATH, but it works straight after `npm install`.
+`npm run dist` writes an installer for whatever machine you run it on into
+`packages/desktop/release/` — `.exe` on Windows, `.dmg` on macOS, `AppImage` and
+`.deb` on Linux. On Windows the installer creates the desktop and Start-menu
+shortcuts itself.
 
 ## The three decisions that shape everything else
 
