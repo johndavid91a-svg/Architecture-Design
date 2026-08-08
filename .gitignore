@@ -19,3 +19,6 @@ dist/
 out/
 *.log
 *.tsbuildinfo
+
+# Packaged application output
+release/

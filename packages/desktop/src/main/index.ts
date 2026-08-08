@@ -38,6 +38,10 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: '#12161c',
     title: 'Architecture Design',
+    // Windows and macOS take the icon from the packaged bundle, but Linux reads
+    // it from the running window, so a packaged Linux build shows a blank
+    // placeholder in the task bar without this. Harmless on the other two.
+    icon: join(dirname, '../../build/icons/512x512.png'),
     webPreferences: {
       // `.js`, not `.mjs`: this package is CommonJS, so electron-vite emits a
       // `.js` preload. If a "type": "module" is ever added, this becomes `.mjs`

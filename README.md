@@ -45,11 +45,28 @@ What exists is real and verified; what does not is listed plainly in
 
 ```bash
 npm install
-npm test          # 109 tests over the calculation engines
+npm test          # 127 tests over the calculation engines
 npm run dev       # launch the desktop app
 ```
 
 Node 20.19+ required. Full instructions in [`docs/SETUP.md`](docs/SETUP.md).
+
+### A desktop icon instead of a command
+
+```bash
+npm run dist          # build a real installable application
+npm run desktop-icon  # put it on the desktop and in the applications menu
+```
+
+`npm run dist` produces an installer for whatever machine you run it on — an
+`.exe` on Windows, a `.dmg` on macOS, an `AppImage` and `.deb` on Linux — under
+`packages/desktop/release/`. On Windows the installer creates the desktop and
+Start-menu shortcuts itself, so `desktop-icon` is only needed on Linux, or
+before packaging.
+
+Run `desktop-icon` without packaging first and it still works: the shortcut
+starts the project through `npm run dev` instead. Slower, and it needs Node on
+the PATH, but it works straight after `npm install`.
 
 ## The three decisions that shape everything else
 
