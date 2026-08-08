@@ -95,7 +95,7 @@ Node 20 or later. Tested on Node 22.22.2, Linux.
 
 ### Quality
 
-- [x] 126 tests passing, 0 failing
+- [x] 127 tests passing, 0 failing
 - [x] Core and desktop type-check clean
 - [x] `contextIsolation: true`, `nodeIntegration: false`, strict CSP, no generic `invoke(channel)`
 - [x] No temporary hacks: every fix in `TESTING_REPORT.md` §7 is a fix to the cause
@@ -104,7 +104,7 @@ Node 20 or later. Tested on Node 22.22.2, Linux.
 
 ## 3. What was fixed this round
 
-Twelve defects, all found by running the code against real files. The full list
+Thirteen defects, all found by running the code against real files. The full list
 with symptoms and fixes is `TESTING_REPORT.md` §7. Three are worth naming here
 because of what they would have cost:
 
