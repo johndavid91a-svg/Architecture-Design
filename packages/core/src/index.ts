@@ -58,6 +58,7 @@ export * from './import/dxf.js';
 export * from './import/pdf.js';
 export * from './import/sheet.js';
 export * from './import/room-labels.js';
+export * from './import/area-schedule.js';
 
 export * from './layout/double-loaded.js';
 export * from './layout/tour.js';

@@ -200,6 +200,127 @@ function mergeCollinear(segments: Seg[], toleranceMm: number, parallelDeg: numbe
 }
 
 // ---------------------------------------------------------------------------
+// Hatching
+// ---------------------------------------------------------------------------
+
+/**
+ * How many equally-spaced parallel lines make a hatch rather than a building.
+ *
+ * A wall is a PAIR of parallel lines a wall-thickness apart. Occasionally a
+ * cavity wall is four. It is never twenty. A hatch fill is precisely twenty —
+ * or fifty — evenly spaced parallel lines covering an area, and that is the
+ * difference this exploits.
+ */
+const HATCH_MIN_FAMILY = 6;
+/**
+ * How long a hatch line is compared with the gap to its neighbour.
+ *
+ * The covered-area block on the sheet that exposed this ran 46 ft diagonals
+ * spaced 9 in apart — a ratio of about 60. A real row of parallel partitions in
+ * a building is nothing like that: hotel bedrooms off a corridor are 12 ft apart
+ * and 20 ft long, a ratio under 2. Requiring 8 keeps a wide margin on both
+ * sides, so no plausible arrangement of real walls can be mistaken for a fill.
+ */
+const HATCH_MIN_LENGTH_TO_GAP = 8;
+/** Gaps outside this band are not a hatch pitch. */
+const HATCH_MIN_GAP_MM = 40;
+const HATCH_MAX_GAP_MM = 5000;
+/** How much the pitch may wander across a family and still be regular. */
+const HATCH_GAP_TOLERANCE = 0.3;
+
+/**
+ * Remove hatch and poché fill before anything is read as a wall.
+ *
+ * This is the single largest source of nonsense in a PDF import, and it does not
+ * announce itself. On a real drawing set the covered-area block plan is filled
+ * with 45° hatching: fifty parallel diagonals, each 46 ft long, running clean
+ * across the whole floor plate. Every one of them paired into a "wall" 10 in
+ * thick, and the face tracer then dutifully found the triangles between them —
+ * so a 1,717 sq ft floor came back as eight slivers totalling 186 sq ft. Nothing
+ * errored. The model was complete, confident and wrong.
+ *
+ * A length threshold cannot catch it, because hatch lines here are longer than
+ * any wall in the building. What separates them is *regularity*: hatching is a
+ * family of many parallel lines at a constant pitch, and building fabric is not.
+ */
+function dropHatchFamilies(
+  segments: Seg[],
+  parallelDeg: number,
+): { kept: Seg[]; dropped: number; families: number } {
+  // Group by direction. Sorting by angle and cutting where the gap exceeds the
+  // tolerance keeps lines that straddle a bucket boundary in the same group,
+  // which fixed-width buckets would split.
+  const byAngle = [...segments].sort((a, b) => a.angle - b.angle);
+  const groups: Seg[][] = [];
+  let current: Seg[] = [];
+  for (const s of byAngle) {
+    if (current.length === 0 || angleDelta(current[current.length - 1]!.angle, s.angle) <= parallelDeg) {
+      current.push(s);
+    } else {
+      groups.push(current);
+      current = [s];
+    }
+  }
+  if (current.length > 0) groups.push(current);
+
+  const doomed = new Set<Seg>();
+  let families = 0;
+
+  for (const group of groups) {
+    if (group.length < HATCH_MIN_FAMILY) continue;
+    const ux = group[0]!.ux;
+    const uy = group[0]!.uy;
+
+    // Perpendicular distance from the origin: parallel lines differ only in this.
+    const placed = group
+      .map((s) => ({ s, offset: -s.a.x * uy + s.a.y * ux }))
+      .sort((a, b) => a.offset - b.offset);
+
+    let start = 0;
+    while (start < placed.length) {
+      // Extend a run while the pitch stays regular.
+      //
+      // A gap is allowed to be a small whole multiple of the pitch, because a
+      // hatch region clipped by the edge of the plate — or two hatched areas
+      // overlapping — leaves lines missing from an otherwise perfectly regular
+      // lattice. Insisting on strictly consecutive equal gaps broke those
+      // families in two and let both halves through as walls, which is what a
+      // first attempt at this did: 56 hatch lines removed and 45 ft diagonals
+      // still pairing into 10-inch walls across the whole floor.
+      let end = start;
+      let pitch = 0;
+      while (end + 1 < placed.length) {
+        const gap = placed[end + 1]!.offset - placed[end]!.offset;
+        if (gap < HATCH_MIN_GAP_MM || gap > HATCH_MAX_GAP_MM) break;
+        if (pitch === 0) {
+          pitch = gap;
+        } else {
+          const multiple = Math.round(gap / pitch);
+          if (multiple < 1 || multiple > 3) break;
+          if (Math.abs(gap - pitch * multiple) > pitch * HATCH_GAP_TOLERANCE) break;
+        }
+        end++;
+      }
+
+      const members = placed.slice(start, end + 1);
+      if (members.length >= HATCH_MIN_FAMILY && pitch > 0) {
+        const lengths = members.map((m) => m.s.length).sort((a, b) => a - b);
+        const medianLength = lengths[Math.floor(lengths.length / 2)] ?? 0;
+        if (medianLength >= pitch * HATCH_MIN_LENGTH_TO_GAP) {
+          for (const m of members) doomed.add(m.s);
+          families++;
+        }
+      }
+
+      // A run of one is not a run; always advance.
+      start = end > start ? end + 1 : start + 1;
+    }
+  }
+
+  return { kept: segments.filter((s) => !doomed.has(s)), dropped: doomed.size, families };
+}
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1149,6 +1270,23 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
   if (byRole.excluded > 0) {
     note('line work on layers that are not building fabric', byRole.excluded);
   }
+
+  // ---- Hatch fill --------------------------------------------------------
+  const hatch = dropHatchFamilies(fabric, opts.parallelToleranceDeg);
+  if (hatch.dropped > 0) {
+    note('hatch and poché fill lines', hatch.dropped);
+    issues.push({
+      severity: 'info',
+      code: 'HATCH_REMOVED',
+      message:
+        `${hatch.dropped} line(s) in ${hatch.families} evenly-spaced parallel family(ies) were read ` +
+        `as hatch or poché fill and left out. A wall is a pair of parallel lines; a family of ` +
+        `${HATCH_MIN_FAMILY} or more at a constant pitch is a fill.`,
+      remedy:
+        'If real walls are missing from the model, check whether the drawing has a run of equally ' +
+        'spaced parallel partitions that this rule caught.',
+    });
+  }
   if (namesItsWalls && byRole.unknown > 0) {
     note('line work on layers not named as walls', byRole.unknown);
     issues.push({
@@ -1180,7 +1318,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
   }
 
   // ---- Walls -----------------------------------------------------------
-  const { walls: paired, unpaired } = pairWalls(fabric, opts);
+  const { walls: paired, unpaired } = pairWalls(hatch.kept, opts);
 
   const singles: WallRun[] = [];
   for (const s of unpaired) {
@@ -1213,7 +1351,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
         {
           severity: 'blocking',
           code: 'NO_WALLS',
-          message: `None of the ${fabric.length} lines of building fabric could be read as a wall.`,
+          message: `None of the ${hatch.kept.length} lines of building fabric could be read as a wall.`,
           remedy:
             'The drawing may be at the wrong scale, or drawn in a style the recogniser does not handle. Check the calibration first.',
         },
@@ -1343,7 +1481,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
     loadBearing: wall.thickness >= 200,
     confidence: wall.confidence,
     note: wall.note,
-    openings: findOpenings(wall, fabric, work.arcs, scale, opts),
+    openings: findOpenings(wall, hatch.kept, work.arcs, scale, opts),
   }));
 
   const openingCount = candidateWalls.reduce((n, w) => n + w.openings.length, 0);

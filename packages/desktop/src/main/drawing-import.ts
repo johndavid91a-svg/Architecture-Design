@@ -302,6 +302,61 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
       });
     }
 
+    // ---- Does the drawing agree with what we read off it? ----------------
+    //
+    // A real set states its covered area, and that figure is the architect's
+    // rather than ours. It is the only ground truth a PDF import has, and it is
+    // worth more than any internal plausibility check: on the set that prompted
+    // this, storeys the schedule puts at 1,717.34 sq ft were recognised as
+    // anywhere from 21 to 976, and nothing in the pipeline could tell. A model
+    // wrong by a factor of eighty that says so is useful. The same model
+    // presenting itself as measured is not.
+    const stated = core.mergeAreaSchedules(pages.map((p) => core.readAreaSchedule(p.texts)));
+    if (stated) {
+      const summary = stated.perStorey.map((s) => `${s.storey} ${s.sqft.toLocaleString()} sq ft`).join(', ');
+      allIssues.push({
+        severity: 'info',
+        code: 'DRAWING_STATES_AREAS',
+        message:
+          `The drawing states its own covered areas: ${summary}` +
+          `${stated.totalSqft ? `, total ${stated.totalSqft.toLocaleString()} sq ft` : ''}` +
+          `${stated.plotSize ? `, on a plot of ${stated.plotSize}` : ''}` +
+          `${stated.plotSqft ? ` (${stated.plotSqft.toLocaleString()} sq ft)` : ''}. ` +
+          `These are the architect's figures, read from the schedule, not measured by this app.`,
+      });
+
+      const comparison = core.compareWithDrawing(
+        stated,
+        floors.map((f) => ({
+          storey: f.name,
+          sqft: f.rooms.reduce((sum, r) => sum + core.polygonArea(r.boundary), 0) / 92_903.04,
+        })),
+      );
+      const wrong = comparison.filter((c) => !c.agrees);
+      if (wrong.length > 0) {
+        const worst = wrong.reduce((w, c) => (c.ratio < w.ratio ? c : w));
+        allIssues.push({
+          severity: 'blocking',
+          code: 'AREA_DISAGREES_WITH_DRAWING',
+          message:
+            `The room areas read from this PDF do not match the areas the drawing states. ` +
+            wrong
+              .map(
+                (c) =>
+                  `${c.storey}: recognised ${c.recognisedSqft.toFixed(0)} sq ft against a stated ` +
+                  `${c.statedSqft.toLocaleString()} (${(c.ratio * 100).toFixed(0)}%)`,
+              )
+              .join('; ') +
+            `. Worst is ${worst.storey}. Room areas, floor finishes and anything costed from them ` +
+            `would be wrong by that much, so do not use this import for quantities. The storey ` +
+            `stack, the storey names and the drawing's own stated areas above are still good.`,
+          remedy:
+            'Import the DXF or IFC for measurable geometry. A PDF has no layers, so a dense plan ' +
+            "cannot be traced reliably — the drawing's own figures are the ones to cost from.",
+        });
+      }
+    }
+
     const scaleless = chosen.floors.filter((s) => (byPage.get(s.pageNumber)?.toMmScale ?? 0) <= 0);
     if (scaleless.length > 0) {
       allIssues.push({

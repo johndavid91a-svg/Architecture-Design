@@ -139,3 +139,75 @@ If room areas matter, ask for the DXF or IFC export of the same project.
 
 Steps 1–3 take minutes and catch the errors that produce a confidently wrong
 building. Step 4 is where the hard, slow work is.
+
+
+## The drawing checks your work — use it
+
+A real set states its own covered area. This one carries a sheet headed
+`SCHEDULE OF COV. AREA`:
+
+```
+PLOT SIZE & AREA           =  40'x45' (1800 sft)
+BASEMENT FLOOR COV. AREA   =  1717.34 Sft
+GROUND  … MEZZANINE … 4TH  =  1717.34 Sft each
+MUMTY FLOOR COV. AREA      =   458.56 Sft
+TOTAL COV. AREA            = 12845.94 Sft
+```
+
+**Read it, and compare it against what you traced.** It is the only ground truth
+a PDF import has, and it is worth more than any internal plausibility check. On
+this set the recogniser produced 21–976 sq ft for storeys stated at 1,717.34 —
+wrong by up to a factor of eighty — and every other check passed, because the
+model was internally consistent and consistently wrong.
+
+Two rules:
+
+- **Pair the label to the figure by position, not by reading order.** `LABEL`,
+  `=` and `1717.34 Sft` arrive as three separate text runs, and PDF reading order
+  is whatever the exporter emitted. A two-column schedule interleaves and silently
+  attaches the wrong number to a storey.
+- **Allow a real gap.** Covered area is measured to the *outside* of the external
+  wall and includes shafts; a sum of traced room polygons is measured to the
+  *inside* faces. 10–20% apart is normal. A factor of two is not a measurement.
+
+Also on the same sheet family: `AREA BLOCK PLAN (<STOREY>)` states one covered
+area per storey, so a set gives you the figure twice over.
+
+## Hatching will destroy a floor plate, quietly
+
+The covered-area block on this set is filled with 45° hatching: ~50 parallel
+diagonals, each **46 ft long, 9 in apart**, running clean across the plate. Every
+one paired into a 10-inch "wall". The face tracer then found the triangles
+between them, so a 1,717 sq ft floor came back as eight slivers totalling 186.
+Nothing errored.
+
+- **A length threshold cannot catch it.** Those hatch lines are longer than any
+  wall in the building.
+- **A stroke-weight filter cannot catch it either** — measured across every
+  weight on the sheet, the best any threshold recovered was 15% of the stated
+  area.
+- **Regularity is what separates them.** A wall is a *pair* of parallel lines a
+  wall-thickness apart; occasionally four for a cavity. A hatch is a *family* of
+  six or more at a constant pitch, each many times longer than the gap to its
+  neighbour. Require both the family size and the length-to-pitch ratio (≥8), or
+  you will delete a row of real partitions.
+- **Allow a missing line.** A hatch region clipped by the plate edge, or two
+  hatched areas overlapping, leaves gaps that are whole multiples of the pitch.
+  Insisting on strictly equal consecutive gaps splits the family in two and lets
+  both halves through.
+
+## What a dense PDF plan can and cannot give you
+
+Measured against this file, honestly:
+
+| Thing | Result |
+|---|---|
+| Page count, sheet classification | **Correct** — 56 sheets, every family right |
+| Storey names and order | **Correct** — Basement → Mumty → Top Roof |
+| Per-page plotting scale from `/Measure` | **Correct** — 1:33–1:36, consistent across plans |
+| The drawing's stated areas | **Correct** — read straight off the schedule |
+| Room polygons and their areas | **Wrong** — 1–57% of stated. Do not cost from them |
+
+Say this. An import that hands over a storey stack, correct names and the
+architect's own figures, while stating plainly that the traced room areas are
+unusable, is worth far more than one that quietly reports 21 sq ft as a floor.

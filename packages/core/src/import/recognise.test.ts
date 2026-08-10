@@ -303,3 +303,67 @@ describe('wall recognition', () => {
     expect(result.issues.some((i) => i.severity === 'blocking')).toBe(true);
   });
 });
+
+describe('hatch and poché fill', () => {
+  /** A room whose interior is filled with 45° hatching, as an area block is. */
+  function hatchedRoom(widthMm: number, depthMm: number, pitchMm: number): LineWork {
+    const work = roomLineWork(widthMm, depthMm, 230);
+    const segments = [...work.segments];
+    // Diagonals across the whole plate, exactly as a covered-area block draws
+    // them: long, regular, and far longer than the gap between them.
+    for (let c = -depthMm; c < widthMm; c += pitchMm) {
+      segments.push({
+        a: { x: Math.max(0, c), y: Math.max(0, -c) },
+        b: { x: Math.min(widthMm, c + depthMm), y: Math.min(depthMm, widthMm - c) },
+        layer: 'A-WALL',
+      });
+    }
+    return { ...work, segments };
+  }
+
+  it('does not read a hatch fill as a floor full of walls', () => {
+    // The failure this exists to prevent: the covered-area block on a real sheet
+    // ran fifty 46 ft diagonals nine inches apart. Every one paired into a
+    // 10-inch "wall", the face tracer found the triangles between them, and a
+    // 1,717 sq ft floor came back as eight slivers totalling 186. Nothing
+    // errored.
+    const plain = recogniseFloor(roomLineWork(12000, 9000, 230));
+    const hatched = recogniseFloor(hatchedRoom(12000, 9000, 300));
+
+    const removed = hatched.issues.find((i) => i.code === 'HATCH_REMOVED');
+    expect(removed, 'the hatch should be identified and reported').toBeDefined();
+
+    // The room survives the fill: same count, same area as the unhatched plan.
+    expect(hatched.floor!.rooms).toHaveLength(plain.floor!.rooms.length);
+    expect(polygonArea(hatched.floor!.rooms[0]!.boundary)).toBeCloseTo(
+      polygonArea(plain.floor!.rooms[0]!.boundary),
+      -4,
+    );
+  });
+
+  it('leaves a real pair of parallel wall lines alone', () => {
+    // A wall IS two parallel lines. If the rule caught pairs it would delete the
+    // building, so the family threshold has to be well above two.
+    const result = recogniseFloor(roomLineWork(6000, 4000, 230));
+    expect(result.issues.find((i) => i.code === 'HATCH_REMOVED')).toBeUndefined();
+    expect(result.floor!.rooms).toHaveLength(1);
+  });
+
+  it('leaves a row of real parallel partitions alone', () => {
+    // Six bedrooms off a corridor are six parallel walls at a constant pitch —
+    // the shape the rule looks for. What separates them from hatching is that a
+    // hatch line is many times longer than its gap and a partition is not, so
+    // this is the case that pins that ratio down.
+    const work = roomLineWork(30000, 6000, 230);
+    const segments = [...work.segments];
+    for (let i = 1; i <= 6; i++) {
+      const x = i * 4000;
+      segments.push({ a: { x, y: 230 }, b: { x, y: 5770 }, layer: 'A-WALL' });
+      segments.push({ a: { x: x + 114, y: 230 }, b: { x: x + 114, y: 5770 }, layer: 'A-WALL' });
+    }
+    const result = recogniseFloor({ ...work, segments });
+    expect(result.issues.find((i) => i.code === 'HATCH_REMOVED')).toBeUndefined();
+    // Seven bays between six partitions, plus nothing lost.
+    expect(result.floor!.rooms.length).toBeGreaterThanOrEqual(6);
+  });
+});
