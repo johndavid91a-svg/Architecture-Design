@@ -11,6 +11,8 @@ import {
   type RoomSpec,
   type RoomUse,
   type CoreKind,
+  createSpaceCentre,
+  SPACE_CENTRE_SUMMARY,
 } from '@adp/core';
 
 interface Props {
@@ -63,7 +65,7 @@ function draft(name: string, use: RoomUse, width: string, depth: string): RoomDr
 }
 
 export function SetupView({ project, onCreated }: Props): JSX.Element {
-  const [name, setName] = useState('Islamabad Plaza');
+  const [name, setName] = useState('National Space Centre');
   const [buildingType, setBuildingType] = useState<BuildingType>('commercial_plaza');
   const [city, setCity] = useState('Islamabad');
   const [floorCount, setFloorCount] = useState(1);
@@ -74,7 +76,7 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
     draft('Conference room', 'conference', "20'", "24'"),
   ]);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'manual' | 'drawing'>('manual');
+  const [mode, setMode] = useState<'template' | 'manual' | 'drawing'>('template');
   const [cores, setCores] = useState<CoreKind[]>(['stair', 'lift']);
 
   const authority: RegulatoryAuthority =
@@ -165,6 +167,12 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
         <label>How do you want to start?</label>
         <div className="row">
           <button
+            className={mode === 'template' ? 'primary' : 'ghost'}
+            onClick={() => setMode('template')}
+          >
+            Start from a worked design
+          </button>
+          <button
             className={mode === 'drawing' ? 'primary' : 'ghost'}
             onClick={() => setMode('drawing')}
           >
@@ -175,13 +183,78 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
           </button>
         </div>
         <div className="small muted" style={{ marginTop: 8 }}>
-          {mode === 'drawing'
-            ? 'Reads an IFC, DXF or vector PDF and builds the 2D plan and the 3D model from it. ' +
-              'Nothing becomes the model until you have seen what was read and what was guessed.'
-            : 'Type the rooms and their sizes. Exact from the first moment, and a good way to start ' +
-              'when there is no drawing to hand.'}
+          {mode === 'template'
+            ? 'Opens a complete, fully dimensioned building you can edit like any other. ' +
+              'Everything computes from the first moment — plan, model, quantities and checks.'
+            : mode === 'drawing'
+              ? 'Reads an IFC, DXF or vector PDF and builds the 2D plan and the 3D model from it. ' +
+                'Nothing becomes the model until you have seen what was read and what was guessed.'
+              : 'Type the rooms and their sizes. Exact from the first moment, and a good way to start ' +
+                'when there is no drawing to hand.'}
         </div>
       </div>
+
+      {mode === 'template' && (
+        <>
+          <div className="card">
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <strong>National Space Centre — four storeys</strong>
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  A public science centre on a 90 × 60 m site: arrival and exhibition on the ground,
+                  galleries and a 16 m planetarium dome above, then research and mission control, with
+                  the auditorium, observatory deck and administration on top. Rooms sit either side of
+                  a circulation spine, the upper floors step back so nothing cantilevers, and the stair
+                  and lift run the full height.
+                </div>
+              </div>
+              <button
+                className="primary"
+                onClick={() =>
+                  onCreated(
+                    createSpaceCentre(
+                      { name: name.trim() || undefined, city: city.trim() || undefined, authority },
+                      new Date().toISOString(),
+                    ),
+                  )
+                }
+              >
+                Create this building
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 0 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Floor</th>
+                  <th className="num">Rooms</th>
+                  <th>Contains</th>
+                </tr>
+              </thead>
+              <tbody>
+                {SPACE_CENTRE_SUMMARY.map((f) => (
+                  <tr key={f.name}>
+                    <td>{f.name}</td>
+                    <td className="num">{f.roomCount}</td>
+                    <td className="small muted">{f.purpose}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="notice info">
+            <strong>It is a starting point, not a compliance claim.</strong>
+            <div className="small" style={{ marginTop: 4 }}>
+              Every dimension is real and every quantity follows from it, but the regulation checker
+              still reports <span className="mono">not_checkable</span> until you enter the actual CDA
+              or RDA limits with their source — exactly as it does for any other building.
+            </div>
+          </div>
+        </>
+      )}
 
       {mode === 'drawing' && (
         <ImportPanel

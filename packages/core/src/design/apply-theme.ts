@@ -35,9 +35,32 @@ import { fromMm2 } from '../units.js';
 /** Rooms that get the circulation floor rather than the primary one. */
 const CIRCULATION_USES = new Set(['corridor', 'lobby', 'stair', 'lift']);
 /** Rooms where a soft floor is conventional and cheaper. */
-const SOFT_FLOOR_USES = new Set(['open_office', 'office', 'executive_office', 'meeting', 'training']);
-/** Rooms that get no false ceiling regardless of theme. */
-const NO_CEILING_USES = new Set(['stair', 'lift', 'plant', 'parking']);
+const SOFT_FLOOR_USES = new Set([
+  'open_office',
+  'office',
+  'executive_office',
+  'meeting',
+  'training',
+  'library',
+  'auditorium',
+]);
+/**
+ * Rooms that get no false ceiling regardless of theme.
+ *
+ * A planetarium's ceiling is the projection dome and an observatory's opens to
+ * the sky; billing either for a suspended grid would be inventing work that
+ * cannot be done. Exhibition halls are here too — they are run as exposed
+ * services so the lighting can be re-rigged for each show.
+ */
+const NO_CEILING_USES = new Set([
+  'stair',
+  'lift',
+  'plant',
+  'parking',
+  'planetarium',
+  'observatory',
+  'exhibition',
+]);
 
 /** Illuminance targets, lux, by room use. Drives the fitting count. */
 const LUX_TARGET: Record<string, number> = {
@@ -58,6 +81,17 @@ const LUX_TARGET: Record<string, number> = {
   retail: 750,
   kitchen: 500,
   pantry: 300,
+  dining: 200,
+  // Public and scientific rooms, from the EN 12464-1 task-illuminance classes.
+  // The two dark rooms are the ones that matter: a planetarium or an observatory
+  // lit to office levels is unusable for the thing it exists to do, and lighting
+  // load is a real cost line, not a presentation detail.
+  exhibition: 300,
+  planetarium: 50,
+  auditorium: 200,
+  observatory: 50,
+  control_room: 500,
+  library: 500,
 };
 
 /**

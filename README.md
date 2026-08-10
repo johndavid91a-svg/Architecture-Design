@@ -10,9 +10,10 @@ building; everything is derived from the dimensions of an actual one.
 
 ## Status
 
-Working end to end: **127 unit tests** over the calculation engines, **96 checks**
-across six generated buildings on real Pakistani plot sizes, and an **18-step
-journey** driving the built application through every screen. The IFC importer is
+Working end to end: **141 unit tests** over the calculation engines, **96 checks**
+across six generated buildings on real Pakistani plot sizes, **10 checks** on the
+worked Space Centre design, and an **18-step journey** driving the built
+application through every screen including both animations. The IFC importer is
 validated against **12 published reference buildings**, with imported room areas
 within **0.5% mean** of each file's own declared quantities.
 
@@ -22,8 +23,11 @@ What exists is real and verified; what does not is listed plainly in
 
 | Working now | Not yet built |
 | --- | --- |
-| Digital twin from manual measurements | PDF scale calibration UI (IFC and DXF work end to end) |
-| Drawing import from IFC and DXF, layer-aware, validated against real buildings | Raster (scanned) drawing recognition |
+| A worked four-storey Space Centre to open into and edit | PDF scale calibration UI (IFC and DXF work end to end) |
+| Double-loaded corridor plates: rooms either side of a circulation spine | Curved and non-orthogonal plate geometry |
+| Animated circulation walk in 2D, assemble and fly-around in 3D | Recorded video export of the animations |
+| Digital twin from manual measurements | Raster (scanned) drawing recognition |
+| Drawing import from IFC and DXF, layer-aware, validated against real buildings | |
 | Vertical circulation: stair and lift cores as real rooms, in the takeoff | Curved-wall recognition in DXF |
 | Architecture / design layer separation, enforced at runtime | AI Architect, Exterior Designer and Design Director call loops |
 | Editable 2D plan: drag, resize, openings, undo/redo | Automated price connectors (blocked by network policy — see below) |
@@ -45,7 +49,7 @@ What exists is real and verified; what does not is listed plainly in
 
 ```bash
 npm install
-npm test          # 127 tests over the calculation engines
+npm test          # 141 tests over the calculation engines
 npm run dev       # launch the desktop app
 ```
 

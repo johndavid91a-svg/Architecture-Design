@@ -43,6 +43,7 @@ import type { Design } from './model/design.js';
 import { emptyDesign } from './model/design.js';
 import { recomputeBoundingWalls } from './model/edit.js';
 import { addCores, type CoreKind, type StairCheck } from './model/circulation.js';
+import { buildDoubleLoadedFloor, type PlateSpec } from './layout/double-loaded.js';
 import { toMm } from './units.js';
 
 export interface Project {
@@ -279,6 +280,16 @@ export interface ProjectSpec {
    * which needs none.
    */
   readonly cores?: readonly CoreKind[];
+  /**
+   * How rooms are arranged on each floor.
+   *
+   * `strip` lays them in a single row — exact from the first moment, and the
+   * right default when someone is typing a handful of rooms to get a quantity
+   * out. `plate` puts a circulation corridor down the middle with rooms either
+   * side, which is what a real multi-room building looks like and what a floor
+   * needs before anyone can walk around it. Supplying `plates` selects it.
+   */
+  readonly plates?: readonly PlateSpec[];
 }
 
 export function createProject(spec: ProjectSpec, now: string): Project {
@@ -286,7 +297,12 @@ export function createProject(spec: ProjectSpec, now: string): Project {
   const siteId = newId<SiteId>('sit');
   const buildingId = newId<BuildingId>('bld');
 
-  const baseFloors = spec.floors.map((f) => buildFloorFromRooms(f, buildingId));
+  // A plate spec and a floor spec are two ways to describe the same building;
+  // whichever was given wins, and neither changes a dimension.
+  const baseFloors =
+    spec.plates && spec.plates.length > 0
+      ? spec.plates.map((p) => buildDoubleLoadedFloor(p, buildingId))
+      : spec.floors.map((f) => buildFloorFromRooms(f, buildingId));
 
   // Stair and lift cores are real rooms with real walls, so they carry into the
   // takeoff. A lift shaft is four walls of masonry on every floor, which is a

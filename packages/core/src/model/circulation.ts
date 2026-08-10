@@ -149,7 +149,20 @@ export function addCores(
     const walls: Wall[] = [...floor.walls];
     const stairs: Stair[] = [...floor.stairs];
 
-    let cursorX = extent + 1200; // 1.2 m corridor between the last room and the core
+    // Where the core lands.
+    //
+    // On a floor with a circulation spine, the core belongs at the end of it,
+    // centred on the corridor: that is where a real core goes, it is what the
+    // corridor's escape door already opens towards, and it keeps the core within
+    // the building's envelope instead of hanging off a corner. Without a spine —
+    // a room strip, or an import that never closed a corridor — it falls back to
+    // sitting past the last room, which is the only sensible place left.
+    const spine = floor.rooms.find((r) => r.use === 'corridor');
+    const spineCentreY = spine
+      ? (Math.min(...spine.boundary.map((p) => p.y)) + Math.max(...spine.boundary.map((p) => p.y))) / 2
+      : null;
+
+    let cursorX = extent + (spine ? 229 : 1200); // abut the end wall, or leave a corridor gap
 
     for (const kind of kinds) {
       const size =
@@ -157,7 +170,10 @@ export function addCores(
           ? stairCoreSize(floor.floorToFloor)
           : { widthMm: LIFT_CORE.widthMm, depthMm: LIFT_CORE.depthMm };
 
-      const origin: Point2 = { x: cursorX, y: 0 };
+      const origin: Point2 =
+        spineCentreY === null
+          ? { x: cursorX, y: 0 }
+          : { x: cursorX, y: spineCentreY - size.depthMm / 2 };
       const boundary = rectangleBoundary(origin, size.widthMm, size.depthMm);
       const roomId = newId<RoomId>('rm');
 

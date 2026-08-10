@@ -12,13 +12,14 @@ it says so.
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit and integration tests | `npm test` | **127 passed**, 14 files, 0 failed |
+| Unit and integration tests | `npm test` | **141 passed**, 15 files, 0 failed |
 | Core type check | `npm run typecheck --workspace @adp/core` | Clean |
 | Desktop type check | `npm run typecheck --workspace @adp/desktop` | Clean |
 | Desktop build | `npm run build --workspace @adp/desktop` | Clean — main, preload, renderer (1,474 kB) |
 | Generated-building scenarios | `node tools/scenarios.mjs` | **96 checks passed** across 6 buildings |
 | Main-process import path | `node tools/test-main-import.mjs` | **11 checks passed** |
 | End-to-end user journey in the running app | Electron under Xvfb | **18 steps passed**, no console errors |
+| Worked Space Centre design | `node tools/space-centre-check.mjs` | **10 checks passed** |
 | IFC reference buildings | `node tools/test-ifc-import.mjs` | 12 models imported, results below |
 | DXF reference drawings | `node tools/test-dxf-import.mjs` | 3 drawings, results below |
 
@@ -112,6 +113,38 @@ a building 1.15 m wide. Before this round it silently produced zero rooms; it no
 refuses with the reason and the remedy. That is the correct outcome: a drawing at
 the wrong scale produces a complete, plausible model of a building that is not the
 one on the paper, and nothing downstream can detect it.
+
+---
+
+## 4a. The worked Space Centre design
+
+`node tools/space-centre-check.mjs`. A four-storey public science centre, built by
+the template and checked as a building rather than as data.
+
+| Floor | Plate | Area | Rooms | Openings | Floor-to-floor |
+|---|---|---|---|---|---|
+| Ground — arrival, exhibition | 63.5 × 32.6 m | 18,066 sq ft | 12 | 46 | 7.2 m |
+| First — galleries, planetarium | 63.5 × 32.6 m | 21,841 sq ft | 11 | 34 | 8.7 m |
+| Second — mission control, laboratories | 63.5 × 28.6 m | 15,948 sq ft | 12 | 42 | 4.5 m |
+| Third — auditorium, observatory, admin | 63.5 × 26.6 m | 14,832 sq ft | 12 | 45 | 4.2 m |
+
+70,031 sq ft over four floors on a 90 × 60 m site: **37.8% ground coverage, FAR
+1.20**, 259 takeoff lines. Ten checks pass, including the ones that catch the
+mistakes a generated plan actually makes:
+
+- Every room has a door onto circulation. A room nobody can enter is the most
+  embarrassing thing a generated plan can contain.
+- **No upper floor oversails the one below it.** A floor wider or deeper than its
+  neighbour is a cantilever — an engineering decision with a cost, not something a
+  room schedule should cause by accident. The plates step 32.6 → 28.6 → 26.6 m.
+- The planetarium and the data centre have no windows: daylight ruins a projection
+  dome and is a thermal load on a room full of servers.
+- The authored 16 m dome measures 16 m after layout, to six decimal places. If the
+  layout had quietly resized it to tidy the plate, every quantity from it is wrong.
+- The stair and lift run the full height, and every floor has an escape door.
+
+The regulation checker still reports `not_checkable` for this building, as it does
+for every other, because no real CDA or RDA limit has been entered.
 
 ---
 
@@ -224,6 +257,9 @@ Every one was found by running the code against real files, not by reading it.
 | 10 | **A drawing at the wrong scale was measured rather than refused.** | `floorplan.dxf` produced zero rooms with no explanation. | Plausibility check on the drawing extent, refusing below 3 m across with the reason and the remedy. |
 | 11 | **"No rooms found" gave no reason.** | Ceco and floorplan both reported it, for completely different causes. | The face walk now reports why faces were rejected, and `NO_ROOMS` names the cause and gives the matching remedy. |
 | 12 | **A file with no extension had its whole path quoted back as its file type.** `/etc/hostname` reported `Unsupported file type "./etc/hostname"`. | Error-handling checks in the main-process harness. | Take the extension from the file name, and say plainly when there is none. |
+| 14 | **The 3D presentation animations ran at a speed that depended on frame rate.** The cinematic clock accumulated the per-frame `dt`, which is deliberately clamped at 0.05 s so a stalled frame cannot teleport a walker through a wall. Right for movement, wrong for a timed animation: on a machine rendering at 10 fps a 3-second sequence took three times as long and never appeared to finish. | The assemble animation failed to settle within its own duration during the end-to-end run. | Read the wall clock directly instead of accumulating clamped steps. |
+| 15 | **Stair and lift cores were placed outside the building.** They were positioned past the far corner of the widest floor at y = 0, which reads as an annex hanging off the corner rather than a core. | Visible in the 3D capture of the Space Centre. | Place the core on the circulation spine, centred on the corridor and abutting its end wall — where a real core goes, and where the corridor's escape door already leads. |
+| 16 | **Room labels collided in small rooms.** A lift shaft is 1.5 m across; three centred lines of text landed on top of the staircase beside it. | Visible in the 2D capture. | Measure the name against the room and drop to name-only, then to nothing, rather than smearing. |
 | 13 | **Inch fractions were never reduced.** The plan showed a staircase as `3' 11 2/8"` and a lift as `0' 6/8"` where an architect writes `11 1/4"` and `3/4"`. | Reading the 2D plan capture from the end-to-end journey run. | Reduce the fraction to lowest terms in `formatLength`. |
 
 Defects 2–8 all had the same character: the code was correct on the one-room

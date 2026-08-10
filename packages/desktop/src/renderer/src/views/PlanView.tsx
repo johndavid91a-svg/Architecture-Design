@@ -23,6 +23,8 @@ import {
   type RoomUse,
   type Wall,
   type WallId,
+  buildTour,
+  tourPointAt,
 } from '@adp/core';
 import type { ProjectStore } from '../state/project-store.js';
 import { cacheFrame, registerCanvas } from '../state/view-capture.js';
@@ -55,6 +57,14 @@ const USES: readonly RoomUse[] = [
   'toilet',
   'store',
   'retail',
+  'dining',
+  'exhibition',
+  'planetarium',
+  'auditorium',
+  'observatory',
+  'control_room',
+  'library',
+  'plant',
   'other',
 ];
 
@@ -80,8 +90,20 @@ export function PlanView({ store }: Props): JSX.Element {
   const [pointerMm, setPointerMm] = useState<{ x: number; y: number } | null>(null);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [touring, setTouring] = useState(false);
+  const [tourLabel, setTourLabel] = useState('');
 
   const floor: Floor | undefined = floors[Math.min(floorIndex, floors.length - 1)];
+
+  /**
+   * The walk-through: where the marker is along the route, and how far each
+   * door has swung open. Kept in a ref rather than state because it changes on
+   * every animation frame, and putting it in state would re-render the whole
+   * view sixty times a second to move one dot.
+   */
+  const tour = useMemo(() => (floor ? buildTour(floor) : null), [floor]);
+  const tourRef = useRef({ distance: 0, swing: new Map<string, number>() });
+  const drawRef = useRef<() => void>(() => {});
 
   // Kept in a ref so the pointer handlers see current values without rebinding.
   const dragRef = useRef<{ active: boolean; lastX: number; lastY: number; scale: number } | null>(null);
@@ -214,6 +236,47 @@ export function PlanView({ store }: Props): JSX.Element {
               : '#5fb0e6';
           ctx.lineWidth = 3;
           ctx.stroke();
+
+          // ---- Door swing --------------------------------------------------
+          // The leaf and its arc, drawn the way a plan draws them. The swing
+          // angle is animated as the tour passes, which is not decoration: the
+          // arc is the space the door needs to open into, and seeing it sweep
+          // is how you notice it is sweeping into something.
+          if (opening.kind === 'door') {
+            const swing = tourRef.current.swing.get(opening.id) ?? 0;
+            if (swing > 0.01) {
+              const hingeX = cx - ux * half;
+              const hingeY = cy - uy * half;
+              const base = Math.atan2(uy, ux);
+              const angle = base - (Math.PI / 2) * swing;
+              const leafX = hingeX + Math.cos(angle) * opening.width;
+              const leafY = hingeY + Math.sin(angle) * opening.width;
+
+              ctx.beginPath();
+              ctx.moveTo(tx(hingeX), ty(hingeY));
+              ctx.lineTo(tx(leafX), ty(leafY));
+              ctx.strokeStyle = 'rgba(217,164,65,0.95)';
+              ctx.lineWidth = 2;
+              ctx.stroke();
+
+              // Canvas y is inverted relative to model y, so the sweep runs the
+              // other way on screen than it does in the model.
+              ctx.beginPath();
+              ctx.arc(
+                tx(hingeX),
+                ty(hingeY),
+                opening.width * scale,
+                -base,
+                -base + (Math.PI / 2) * swing,
+                false,
+              );
+              ctx.strokeStyle = 'rgba(217,164,65,0.35)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 3]);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
+          }
         }
       }
 
@@ -224,9 +287,21 @@ export function PlanView({ store }: Props): JSX.Element {
         const b = boundsOf(room.boundary);
         const areaSqft = fromMm2(polygonArea(room.boundary), 'ft2');
 
-        ctx.fillStyle = '#e6eaf0';
+        // How much of the label a room can carry without it spilling over its
+        // neighbours. A lift shaft is a metre and a half across: three lines of
+        // text centred on it land on top of the staircase beside it and both
+        // become unreadable, so a small room gets its name only, and a room too
+        // small even for that gets nothing rather than a smear.
+        const widthPx = (b.maxX - b.minX) * scale;
+        const heightPx = (b.maxY - b.minY) * scale;
         ctx.font = '600 12px system-ui, sans-serif';
-        ctx.fillText(room.name, tx(c.x), ty(c.y) - 6);
+        const namePx = ctx.measureText(room.name).width;
+        const room_ = widthPx > namePx + 8 && heightPx > 46 ? 'full' : heightPx > 14 ? 'name' : 'none';
+        if (room_ === 'none') continue;
+
+        ctx.fillStyle = '#e6eaf0';
+        ctx.fillText(room.name, tx(c.x), ty(c.y) - (room_ === 'full' ? 6 : -4));
+        if (room_ !== 'full') continue;
 
         ctx.fillStyle = '#97a3b4';
         ctx.font = '11px ui-monospace, monospace';
@@ -237,8 +312,55 @@ export function PlanView({ store }: Props): JSX.Element {
         );
         ctx.fillText(`${areaSqft.toFixed(0)} sq ft`, tx(c.x), ty(c.y) + 24);
       }
+
+      // ---- The walk -------------------------------------------------------
+      if (tour && tour.path.length >= 2) {
+        const walked = tourRef.current.distance;
+
+        // The whole route, faint: the circulation spine the floor is organised
+        // around, visible whether or not the tour is running.
+        ctx.beginPath();
+        tour.path.forEach((pt, i) => {
+          if (i === 0) ctx.moveTo(tx(pt.x), ty(pt.y));
+          else ctx.lineTo(tx(pt.x), ty(pt.y));
+        });
+        ctx.strokeStyle = 'rgba(95,176,230,0.25)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 6]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (walked > 0) {
+          // The part already walked, solid.
+          ctx.beginPath();
+          let drawn = 0;
+          ctx.moveTo(tx(tour.path[0]!.x), ty(tour.path[0]!.y));
+          for (let i = 0; i < tour.path.length - 1 && drawn < walked; i++) {
+            const a = tour.path[i]!;
+            const b = tour.path[i + 1]!;
+            const seg = Math.hypot(b.x - a.x, b.y - a.y);
+            const t = Math.min(1, (walked - drawn) / (seg || 1));
+            ctx.lineTo(tx(a.x + (b.x - a.x) * t), ty(a.y + (b.y - a.y) * t));
+            drawn += seg;
+          }
+          ctx.strokeStyle = 'rgba(95,176,230,0.9)';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // Where the walker is now.
+          const here = tourPointAt(tour, walked);
+          ctx.beginPath();
+          ctx.arc(tx(here.at.x), ty(here.at.y), 7, 0, Math.PI * 2);
+          ctx.fillStyle = '#5fb0e6';
+          ctx.fill();
+          ctx.strokeStyle = '#0d1116';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
     };
 
+    drawRef.current = draw;
     draw();
     registerCanvas('plan', canvas);
     const observer = new ResizeObserver(draw);
@@ -250,7 +372,72 @@ export function PlanView({ store }: Props): JSX.Element {
       registerCanvas('plan', null);
       observer.disconnect();
     };
-  }, [floor, transform, selection, projection]);
+  }, [floor, transform, selection, projection, tour]);
+
+  /**
+   * Walk the route.
+   *
+   * Real walking pace — 1.4 m/s is the figure circulation and escape-time
+   * calculations use — so the time the tour takes is the time the walk takes.
+   * A door opens as the walker comes within 3 m of it and closes behind them,
+   * which is what makes the swing arcs readable one at a time instead of the
+   * whole floor blinking at once.
+   */
+  useEffect(() => {
+    if (!touring || !tour || tour.totalLength <= 0) return;
+
+    const PACE_MM_PER_MS = 1.4; // 1.4 m/s
+    const OPEN_WITHIN_MM = 3000;
+    let frame = 0;
+    let last = performance.now();
+
+    const step = (now: number) => {
+      const dt = Math.min(now - last, 100); // a backgrounded tab must not leap
+      last = now;
+
+      const state = tourRef.current;
+      state.distance += dt * PACE_MM_PER_MS;
+      if (state.distance > tour.totalLength) state.distance = 0;
+
+      if (floor) {
+        const here = tourPointAt(tour, state.distance);
+        for (const wall of floor.walls) {
+          const dx = wall.end.x - wall.start.x;
+          const dy = wall.end.y - wall.start.y;
+          const len = Math.hypot(dx, dy) || 1;
+          for (const opening of wall.openings) {
+            if (opening.kind !== 'door') continue;
+            const at = {
+              x: wall.start.x + (dx / len) * opening.distanceAlongWall,
+              y: wall.start.y + (dy / len) * opening.distanceAlongWall,
+            };
+            const gap = Math.hypot(at.x - here.at.x, at.y - here.at.y);
+            const target = gap < OPEN_WITHIN_MM ? 1 : 0;
+            const current = state.swing.get(opening.id) ?? 0;
+            // Ease towards the target so the leaf swings rather than snaps.
+            state.swing.set(opening.id, current + (target - current) * Math.min(1, dt / 220));
+          }
+        }
+
+        const reached = [...tour.stops].filter((s) => s.distanceAlong <= state.distance).pop();
+        setTourLabel(reached ? reached.name : 'Setting off');
+      }
+
+      drawRef.current();
+      frame = requestAnimationFrame(step);
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [touring, tour, floor]);
+
+  /** Leaving the tour must leave the drawing static, not frozen mid-swing. */
+  const stopTour = useCallback(() => {
+    setTouring(false);
+    tourRef.current = { distance: 0, swing: new Map() };
+    setTourLabel('');
+    drawRef.current();
+  }, []);
 
   /** Hit-test: walls take priority over rooms, since they are the thinner target. */
   const pick = useCallback(
@@ -396,6 +583,32 @@ export function PlanView({ store }: Props): JSX.Element {
         <div className="small muted" style={{ marginTop: 4 }}>
           {floor.name}
         </div>
+
+        <label style={{ marginTop: 10 }}>Circulation</label>
+        <div className="row">
+          <button
+            className={touring ? 'primary' : 'ghost'}
+            onClick={() => (touring ? stopTour() : setTouring(true))}
+            disabled={!tour || tour.totalLength <= 0}
+            title={
+              tour && tour.totalLength > 0
+                ? 'Walk the corridor at 1.4 m/s, opening each door on the way'
+                : 'This floor has no circulation route to walk'
+            }
+          >
+            {touring ? 'Stop the walk' : 'Walk the floor'}
+          </button>
+          {tour && tour.totalLength > 0 && (
+            <span className="small muted">
+              {(tour.totalLength / 1000).toFixed(0)} m · {tour.stops.length} rooms
+            </span>
+          )}
+        </div>
+        {touring && tourLabel && (
+          <div className="small" style={{ marginTop: 4, color: 'var(--accent)' }}>
+            Passing {tourLabel}
+          </div>
+        )}
 
         <div className="row" style={{ marginTop: 10 }}>
           <button className="ghost" onClick={store.undo} disabled={!store.canUndo} title={store.undoLabel ?? ''}>

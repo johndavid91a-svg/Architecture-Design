@@ -126,6 +126,15 @@ export type RoomUse =
   | 'bedroom'
   | 'living'
   | 'dining'
+  // Public and scientific institutions. These are not decoration: each one
+  // carries different lighting, finish and ceiling rules, and a planetarium
+  // costed as an office would be wrong by a wide margin.
+  | 'exhibition'
+  | 'planetarium'
+  | 'auditorium'
+  | 'observatory'
+  | 'control_room'
+  | 'library'
   | 'other';
 
 /**

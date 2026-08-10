@@ -55,4 +55,8 @@ export * from './import/recognise.js';
 export * from './import/dxf.js';
 export * from './import/pdf.js';
 
+export * from './layout/double-loaded.js';
+export * from './layout/tour.js';
+export * from './templates/space-centre.js';
+
 export * from './project.js';

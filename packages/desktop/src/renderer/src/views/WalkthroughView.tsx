@@ -26,6 +26,23 @@ interface Props {
 
 type Mode = 'orbit' | 'walk';
 
+/**
+ * The two presentation animations.
+ *
+ * `assemble` raises the storeys into place one after another, which is how a
+ * building is explained to someone who has not seen it: the stack of floors and
+ * how each one sits on the last. `flyaround` orbits it at a steady rate for a
+ * walk-round without anyone having to drag the mouse. Both are presentation
+ * tools and neither touches the model.
+ */
+type Cinematic = 'none' | 'assemble' | 'flyaround';
+
+/** Seconds each storey takes to rise, and the overlap between consecutive ones. */
+const ASSEMBLE_RISE_S = 0.9;
+const ASSEMBLE_STAGGER_S = 0.45;
+/** Seconds for one full orbit. Slow enough to read the elevations as they pass. */
+const FLYAROUND_PERIOD_S = 26;
+
 const EYE_HEIGHT_MM = 1650;
 const WALK_SPEED_MM_PER_S = 3000;
 const COLLISION_RADIUS_MM = 300;
@@ -56,6 +73,20 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const [status, setStatus] = useState('');
   const [sunInfo, setSunInfo] = useState('');
   const [prompt, setPrompt] = useState<{ label: string; up: boolean; down: boolean } | null>(null);
+  const [cinematic, setCinematic] = useState<Cinematic>('none');
+
+  /**
+   * Cinematic state, read by the render loop each frame.
+   *
+   * A ref rather than state: these advance sixty times a second, and a re-render
+   * per frame would cost more than the animation does.
+   */
+  const cinematicRef = useRef<{ kind: Cinematic; startedAt: number; elapsed: number }>({
+    kind: 'none',
+    startedAt: 0,
+    elapsed: 0,
+  });
+  cinematicRef.current.kind = cinematic;
 
   const cores = useMemo(() => transportPoints(floors), [floors]);
   const coresRef = useRef(cores);
@@ -169,8 +200,17 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     });
     const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 0.6 });
 
+    // One group per storey. Everything a floor owns goes in its own group so a
+    // floor can be moved, faded or hidden as a unit — which is what makes the
+    // assemble animation and the exploded view possible without rebuilding the
+    // scene each time.
+    const floorGroups = new Map<number, THREE.Group>();
+
     for (const floor of floors) {
       const elevation = floor.elevation * MM;
+      const floorGroup = new THREE.Group();
+      floorGroups.set(floor.level, floorGroup);
+      building.add(floorGroup);
 
       for (const room of floor.rooms) {
         allPoints.push(...room.boundary);
@@ -196,7 +236,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         slab.rotation.x = -Math.PI / 2;
         slab.position.y = elevation + 0.01;
         slab.receiveShadow = true;
-        building.add(slab);
+        floorGroup.add(slab);
 
         const ceilingDrop = (rd?.ceiling.dropHeight ?? 0) * MM;
         // Same rotation as the slab, so it lands in the same place; BackSide so
@@ -209,7 +249,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         ceiling.position.y = elevation + room.clearHeight * MM - ceilingDrop;
         ceiling.receiveShadow = true;
         ceilingMeshes.push(ceiling);
-        building.add(ceiling);
+        floorGroup.add(ceiling);
 
         // ---- Stairs, drawn as real steps ---------------------------------
         // A box labelled "stair" is useless in a walkthrough: you cannot tell
@@ -241,7 +281,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
               );
               step.castShadow = true;
               step.receiveShadow = true;
-              building.add(step);
+              floorGroup.add(step);
             }
           }
         }
@@ -263,7 +303,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             -((rb.minY + rb.maxY) / 2) * MM,
           );
           car.castShadow = true;
-          building.add(car);
+          floorGroup.add(car);
         }
 
         // ---- Furniture from the design layer -----------------------------
@@ -283,7 +323,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           furnitureMeshes.push(mesh);
-          building.add(mesh);
+          floorGroup.add(mesh);
         }
       }
 
@@ -348,7 +388,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           mesh.rotation.y = -angle;
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          building.add(mesh);
+          floorGroup.add(mesh);
         };
 
         for (const [a, b] of solids) addBox(a, b, 0, wall.height, material);
@@ -371,7 +411,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             -(wall.start.y + Math.sin(angle) * midAlong) * MM,
           );
           infill.rotation.y = -angle;
-          building.add(infill);
+          floorGroup.add(infill);
         }
       }
     }
@@ -585,6 +625,69 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         );
       }
 
+      // ---- Cinematics -----------------------------------------------------
+      // Both run only in orbit mode: interrupting someone who is walking the
+      // building by taking the camera off them would be worse than useless.
+      const cine = cinematicRef.current;
+      if (cine.kind === 'none') {
+        cine.startedAt = 0;
+        for (const [, group] of floorGroups) {
+          group.position.y = 0;
+          group.visible = true;
+        }
+      } else if (modeRef.current === 'orbit') {
+        // Wall clock, not accumulated `dt`.
+        //
+        // `dt` is deliberately clamped so that a stalled frame cannot teleport a
+        // walker through a wall — right for movement, wrong for a timed
+        // animation. Accumulating a clamped step makes the duration depend on
+        // frame rate: on a machine rendering at 10 fps a 3-second sequence takes
+        // three times as long and looks broken. Reading the clock directly makes
+        // it take three seconds everywhere, however many frames that is.
+        if (cine.startedAt === 0) cine.startedAt = now;
+        cine.elapsed = (now - cine.startedAt) / 1000;
+
+        if (cine.kind === 'assemble') {
+          const levels = [...floorGroups.keys()].sort((a, b) => a - b);
+          levels.forEach((level, index) => {
+            const group = floorGroups.get(level)!;
+            const start = index * ASSEMBLE_STAGGER_S;
+            const t = Math.max(0, Math.min(1, (cine.elapsed - start) / ASSEMBLE_RISE_S));
+            // Cubic ease-out: fast away, settling gently, which reads as weight
+            // rather than as a linear slide.
+            const eased = 1 - Math.pow(1 - t, 3);
+            // Each storey drops in from a height proportional to its own level,
+            // so the whole stack separates before it closes up.
+            const dropFrom = (index + 1) * 6;
+            group.position.y = (1 - eased) * dropFrom;
+            group.visible = t > 0;
+          });
+
+          const total = (levels.length - 1) * ASSEMBLE_STAGGER_S + ASSEMBLE_RISE_S + 1.2;
+          if (cine.elapsed > total) {
+            // Settle exactly, then stop: an animation that ends near-but-not-at
+            // its target leaves the model a few centimetres out of place.
+            for (const [, group] of floorGroups) {
+              group.position.y = 0;
+              group.visible = true;
+            }
+            cinematicRef.current.kind = 'none';
+            setCinematic('none');
+          }
+        }
+
+        if (cine.kind === 'flyaround') {
+          const angle = (cine.elapsed / FLYAROUND_PERIOD_S) * Math.PI * 2;
+          const radius = Math.max(spanX, spanY, 30) * 1.15;
+          camera.position.set(
+            target.x + Math.sin(angle) * radius,
+            target.y + Math.max(spanX, spanY, 30) * 0.55,
+            target.z + Math.cos(angle) * radius,
+          );
+          camera.lookAt(target);
+        }
+      }
+
       if (modeRef.current === 'walk') {
         // A pending floor change, requested by the E or Q key handler.
         const jump = teleportRef.current;
@@ -736,6 +839,41 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             </div>
           </>
         )}
+
+        <label style={{ marginTop: 10 }}>Presentation</label>
+        <div className="row">
+          <button
+            className={cinematic === 'assemble' ? 'primary' : 'ghost'}
+            onClick={() => {
+              // Restarting means restarting: reset the clock, or pressing it a
+              // second time would resume a finished animation and do nothing.
+              cinematicRef.current.startedAt = 0;
+              setMode('orbit');
+              setCinematic(cinematic === 'assemble' ? 'none' : 'assemble');
+            }}
+            title="Raise the storeys into place, one after another"
+          >
+            Assemble
+          </button>
+          <button
+            className={cinematic === 'flyaround' ? 'primary' : 'ghost'}
+            onClick={() => {
+              cinematicRef.current.startedAt = 0;
+              setMode('orbit');
+              setCinematic(cinematic === 'flyaround' ? 'none' : 'flyaround');
+            }}
+            title="Orbit the building slowly, for a walk-round without dragging"
+          >
+            Fly around
+          </button>
+        </div>
+        <div className="small muted" style={{ marginTop: 4 }}>
+          {cinematic === 'assemble'
+            ? 'Building the stack…'
+            : cinematic === 'flyaround'
+              ? 'Orbiting — drag or switch to Walk to take back control.'
+              : 'Presentation only; neither changes the model.'}
+        </div>
 
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
           <input

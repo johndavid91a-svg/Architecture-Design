@@ -95,7 +95,7 @@ Node 20 or later. Tested on Node 22.22.2, Linux.
 
 ### Quality
 
-- [x] 127 tests passing, 0 failing
+- [x] 141 tests passing, 0 failing
 - [x] Core and desktop type-check clean
 - [x] `contextIsolation: true`, `nodeIntegration: false`, strict CSP, no generic `invoke(channel)`
 - [x] No temporary hacks: every fix in `TESTING_REPORT.md` §7 is a fix to the cause
