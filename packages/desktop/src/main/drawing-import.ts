@@ -245,29 +245,71 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
     const allIssues: ImportIssue[] = [...issues];
     let stats: ImportStats | null = null;
 
-    // Only the pages that have a scale. A title sheet, a 3D view or a sheet
-    // carrying two different scales has `toMmScale: 0`, and running the
-    // recogniser over it would either produce nothing or — worse — produce
-    // geometry at a scale of zero. Those pages already carry their own issue
-    // explaining why they were left out.
-    usable.forEach((page, index) => {
+    // ---- Which sheets are floors? ----------------------------------------
+    // A drawing set is not a stack of floors. This set of 56 sheets holds nine
+    // floor plans; the rest are the title sheet, an index, a 3D view, a site
+    // plan, structural grids, opening plans, area blocks, elevations, sections
+    // and details. Taking one floor per page turned a nine-storey building into
+    // a 52-storey tower — a complete, confident, wrong answer.
+    const sheets = pages.map((page) => core.identifySheet(page.stats.pageNumber, page.texts));
+    const chosen = core.chooseFloorSheets(sheets);
+    const byPage = new Map(pages.map((p) => [p.stats.pageNumber, p]));
+
+    for (const sheet of chosen.floors) {
+      const page = byPage.get(sheet.pageNumber);
+      if (!page || page.toMmScale <= 0) continue;
+
       const recognised = core.recogniseFloor(page, {
-        floorName: page.sheetName ?? `Page ${index + 1}`,
-        level: index,
+        // The storey, not the sheet number. "Mezzanine" is what the user calls
+        // this floor; "Page 24" is what the PDF calls it.
+        floorName: sheet.storey ?? page.sheetName ?? `Page ${sheet.pageNumber}`,
+        level: sheet.level ?? 0,
+        // Deliberately left at the default.
+        //
+        // Raising the minimum wall run was tried against this set at 400, 600,
+        // 900, 1200 and 1800 mm. It never converged: 1200 mm brought the third
+        // floor to 1,258 sq ft against the 1,292 sq ft the drawing itself states,
+        // and simultaneously emptied the basement and first floor of every room.
+        // Every value traded one wrong answer for another, so none is shipped.
+        // Tuning a threshold until one number looks right is how a plausible
+        // wrong building gets built.
       });
       if (recognised.floor) floors.push(recognised.floor);
       allIssues.push(...recognised.issues);
       stats = recognised.stats;
-    });
+    }
 
-    if (usable.length < pages.length) {
+    if (chosen.floors.length > 0) {
+      const storeys = chosen.floors.map((f) => f.storey).join(', ');
+      allIssues.push({
+        severity: 'info',
+        code: 'SHEETS_CLASSIFIED',
+        message:
+          `${pages.length} sheet(s) read; ${chosen.floors.length} of them are floor plans ` +
+          `(${chosen.family} plans): ${storeys}. The rest — elevations, sections, structural ` +
+          `grids, schedules and details — draw the same building and are not storeys.`,
+      });
+    } else {
+      allIssues.push({
+        severity: 'review',
+        code: 'NO_FLOOR_PLANS_IDENTIFIED',
+        message:
+          `None of the ${pages.length} sheet(s) could be identified as a floor plan from its title, ` +
+          `so no storey could be built.`,
+        remedy:
+          'Sheet titles are read to tell a floor plan from an elevation or a section. If this set ' +
+          'names its sheets differently, import the single plan sheet you want on its own.',
+      });
+    }
+
+    const scaleless = chosen.floors.filter((s) => (byPage.get(s.pageNumber)?.toMmScale ?? 0) <= 0);
+    if (scaleless.length > 0) {
       allIssues.push({
         severity: 'review',
         code: 'PDF_PAGES_WITHOUT_SCALE',
         message:
-          `${pages.length - usable.length} of ${pages.length} page(s) had no single usable scale and ` +
-          `were left out — typically the title sheet, a 3D view, or a sheet carrying two drawings at ` +
-          `different scales.`,
+          `${scaleless.length} floor plan(s) had no single usable scale and were left out: ` +
+          `${scaleless.map((s) => s.storey).join(', ')}.`,
         remedy: 'Import those sheets separately, or calibrate them by hand.',
       });
     }

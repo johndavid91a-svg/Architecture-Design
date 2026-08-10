@@ -54,6 +54,7 @@ export * from './import/ifc.js';
 export * from './import/recognise.js';
 export * from './import/dxf.js';
 export * from './import/pdf.js';
+export * from './import/sheet.js';
 
 export * from './layout/double-loaded.js';
 export * from './layout/tour.js';

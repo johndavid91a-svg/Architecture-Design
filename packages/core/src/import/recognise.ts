@@ -47,6 +47,16 @@ export interface RecogniseOptions {
   /** Unpaired lines shorter than this are treated as annotation, not walls. */
   readonly minSingleLineWallMm?: number;
   /**
+   * Shortest paired-line run that may be a wall.
+   *
+   * Defaults to the sanity floor, because a DXF can be filtered by layer and a
+   * genuine 300 mm wall stub should survive. A PDF has no layers, and hatching
+   * is *precisely* a field of short parallel line pairs a wall-thickness apart —
+   * so on a PDF this is raised, and the drawing's poche stops being read as
+   * hundreds of tiny walls.
+   */
+  readonly minWallRunMm?: number;
+  /**
    * Largest gap between two collinear wall runs that will be treated as an
    * opening in one wall rather than a genuine break between two.
    */
@@ -63,6 +73,7 @@ const DEFAULTS = {
   minOverlapFraction: 0.6,
   singleLineWallThicknessMm: 114,
   minSingleLineWallMm: 1500,
+  minWallRunMm: SANITY.minWallLengthMm,
   // Wide enough for a double door or a picture window, short of the 3 m-plus
   // spans where an "opening" is more likely to be a genuinely open side.
   maxOpeningGapMm: 2500,
@@ -1247,7 +1258,14 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
     });
   }
 
-  const walls = [...paired, ...singles];
+  const longEnough = paired.filter(
+    (w) => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) >= opts.minWallRunMm,
+  );
+  if (paired.length - longEnough.length > 0) {
+    note('paired lines too short to be a wall run', paired.length - longEnough.length);
+  }
+
+  const walls = [...longEnough, ...singles];
   if (walls.length === 0) {
     return {
       floor: null,
@@ -1405,7 +1423,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
       skipped: {
         ...skipped,
         'lines merged into runs': raw.length - segments.length,
-        'walls from paired lines': paired.length,
+        'walls from paired lines': longEnough.length,
         'walls from a single line': singles.length,
       },
       parseMs: Date.now() - started,
