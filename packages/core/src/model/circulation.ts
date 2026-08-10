@@ -119,6 +119,141 @@ export function stairCoreSize(floorToFloorMm: Millimetres, treadMm = 280, widthM
 
 export const LIFT_CORE = { widthMm: 2000, depthMm: 2200 } as const;
 
+/** The footprint a core of this kind needs on one floor. */
+export function coreSize(kind: CoreKind, floorToFloorMm: Millimetres): { widthMm: number; depthMm: number } {
+  return kind === 'stair'
+    ? stairCoreSize(floorToFloorMm)
+    : { widthMm: LIFT_CORE.widthMm, depthMm: LIFT_CORE.depthMm };
+}
+
+export interface BuiltCore {
+  readonly room: Room;
+  readonly walls: readonly Wall[];
+  readonly stair: Stair | null;
+  readonly check: StairCheck | null;
+}
+
+/**
+ * Build one core — its room, its four enclosing walls and, for a stair, the
+ * flight itself — at a given origin.
+ *
+ * Split out from `addCores` because a core has to be buildable in two different
+ * situations. A building this app lays out knows where its cores go before it
+ * has any rooms; an imported drawing already has all its rooms and the core has
+ * to be fitted into whatever space is left. The geometry is identical in both
+ * cases and only the origin differs, so only the origin is a parameter.
+ */
+export function buildCore(
+  floor: Floor,
+  kind: CoreKind,
+  origin: Point2,
+  note: string,
+  /**
+   * Footprint to use instead of this floor's own.
+   *
+   * A shaft has to be plumb and the same size all the way up. A stair core's
+   * depth follows its floor-to-floor height, so letting each storey size its own
+   * gives a core that changes shape as it rises. The caller passes the size that
+   * suits the deepest storey and every storey gets it.
+   */
+  sizeOverride?: { widthMm: number; depthMm: number },
+): BuiltCore {
+  const size = sizeOverride ?? coreSize(kind, floor.floorToFloor);
+  const boundary = rectangleBoundary(origin, size.widthMm, size.depthMm);
+  const roomId = newId<RoomId>('rm');
+
+  // Four walls round the core. A lift shaft in particular is a real enclosure
+  // and its masonry belongs in the quantities.
+  const thickness = kind === 'lift' ? 229 : 114;
+  const wallIds: WallId[] = [];
+  const walls: Wall[] = [];
+  const edges: Array<[Point2, Point2]> = [
+    [
+      { x: origin.x, y: origin.y - thickness / 2 },
+      { x: origin.x + size.widthMm, y: origin.y - thickness / 2 },
+    ],
+    [
+      { x: origin.x, y: origin.y + size.depthMm + thickness / 2 },
+      { x: origin.x + size.widthMm, y: origin.y + size.depthMm + thickness / 2 },
+    ],
+    [
+      { x: origin.x - thickness / 2, y: origin.y },
+      { x: origin.x - thickness / 2, y: origin.y + size.depthMm },
+    ],
+    [
+      { x: origin.x + size.widthMm + thickness / 2, y: origin.y },
+      { x: origin.x + size.widthMm + thickness / 2, y: origin.y + size.depthMm },
+    ],
+  ];
+
+  for (let i = 0; i < edges.length; i++) {
+    const [start, end] = edges[i]!;
+    const id = newId<WallId>('wal');
+    wallIds.push(id);
+    walls.push({
+      id,
+      floorId: floor.id,
+      start,
+      end,
+      thickness,
+      height: floor.clearHeight,
+      function: kind === 'lift' ? 'interior' : 'partition',
+      loadBearing: kind === 'lift',
+      // The first wall of the core carries the doorway onto the floor.
+      openings:
+        i === 0
+          ? [
+              {
+                id: newId('opn'),
+                wallId: id,
+                kind: kind === 'lift' ? ('door' as const) : ('archway' as const),
+                distanceAlongWall: size.widthMm / 2,
+                width: Math.min(1100, size.widthMm - 200),
+                height: 2100,
+                sillHeight: 0,
+                isEmergencyExit: kind === 'stair',
+                provenance: {
+                  confidence: 'inferred' as const,
+                  note: `Access into the ${kind} core.`,
+                },
+              },
+            ]
+          : [],
+      provenance: { confidence: 'inferred', note: `${kind} core enclosure. ${note}`.trim() },
+    });
+  }
+
+  const room: Room = {
+    id: roomId,
+    floorId: floor.id,
+    name: kind === 'stair' ? 'Staircase' : 'Lift',
+    use: kind === 'stair' ? 'stair' : 'lift',
+    boundary,
+    clearHeight: floor.clearHeight,
+    boundingWallIds: wallIds,
+    provenance: { confidence: 'inferred', note: `${kind} core. ${note}`.trim() },
+  };
+
+  if (kind !== 'stair') return { room, walls, stair: null, check: null };
+
+  const check = deriveStair(floor.floorToFloor);
+  const stair: Stair = {
+    id: newId<StairId>('str'),
+    floorId: floor.id,
+    name: 'Staircase',
+    footprint: boundary,
+    floorToFloorRise: floor.floorToFloor,
+    treadDepth: check.tread,
+    riserHeight: check.riser,
+    width: size.widthMm,
+    provenance: {
+      confidence: 'inferred',
+      note: `${check.riserCount} risers at ${check.riser.toFixed(0)} mm derived from the floor-to-floor height.`,
+    },
+  };
+  return { room, walls, stair, check };
+}
+
 /**
  * Add stair and lift cores to every floor of a building.
  *
@@ -141,6 +276,42 @@ export function addCores(
     return xs.length > 0 ? Math.max(max, Math.max(...xs)) : max;
   }, 0);
 
+  // Where the core lands — decided ONCE, for the whole building.
+  //
+  // On a floor with a circulation spine, the core belongs at the end of it,
+  // centred on the corridor: that is where a real core goes, it is what the
+  // corridor's escape door already opens towards, and it keeps the core within
+  // the building's envelope instead of hanging off a corner. Without a spine —
+  // a room strip, or an import that never closed a corridor — it falls back to
+  // sitting past the last room, which is the only sensible place left.
+  //
+  // It is decided once because a shaft has to be PLUMB. Reading each storey's
+  // own spine put the lift 3 m further back on the top floor than on the ground
+  // floor of a building whose upper storeys step back — a shaft that moves
+  // sideways as it rises, which cannot be built and which the walkthrough could
+  // only travel by pretending the two were the same shaft. The lowest storey
+  // that has a spine sets the line, and every storey above it keeps to it.
+  const spineFloor = floors.find((f) => f.rooms.some((r) => r.use === 'corridor'));
+  const spine = spineFloor?.rooms.find((r) => r.use === 'corridor');
+  const spineCentreY = spine
+    ? (Math.min(...spine.boundary.map((p) => p.y)) + Math.max(...spine.boundary.map((p) => p.y))) / 2
+    : null;
+  const startX = extent + (spine ? 229 : 1200); // abut the end wall, or leave a corridor gap
+
+  // One footprint per kind, big enough for the deepest storey, used on all of
+  // them — see the note on `buildCore`'s size override.
+  const sizeFor = new Map<CoreKind, { widthMm: number; depthMm: number }>();
+  for (const kind of kinds) {
+    let widthMm = 0;
+    let depthMm = 0;
+    for (const floor of floors) {
+      const size = coreSize(kind, floor.floorToFloor);
+      widthMm = Math.max(widthMm, size.widthMm);
+      depthMm = Math.max(depthMm, size.depthMm);
+    }
+    sizeFor.set(kind, { widthMm, depthMm });
+  }
+
   const checks: StairCheck[] = [];
   const result: Floor[] = [];
 
@@ -149,126 +320,26 @@ export function addCores(
     const walls: Wall[] = [...floor.walls];
     const stairs: Stair[] = [...floor.stairs];
 
-    // Where the core lands.
-    //
-    // On a floor with a circulation spine, the core belongs at the end of it,
-    // centred on the corridor: that is where a real core goes, it is what the
-    // corridor's escape door already opens towards, and it keeps the core within
-    // the building's envelope instead of hanging off a corner. Without a spine —
-    // a room strip, or an import that never closed a corridor — it falls back to
-    // sitting past the last room, which is the only sensible place left.
-    const spine = floor.rooms.find((r) => r.use === 'corridor');
-    const spineCentreY = spine
-      ? (Math.min(...spine.boundary.map((p) => p.y)) + Math.max(...spine.boundary.map((p) => p.y))) / 2
-      : null;
-
-    let cursorX = extent + (spine ? 229 : 1200); // abut the end wall, or leave a corridor gap
+    let cursorX = startX;
 
     for (const kind of kinds) {
-      const size =
-        kind === 'stair'
-          ? stairCoreSize(floor.floorToFloor)
-          : { widthMm: LIFT_CORE.widthMm, depthMm: LIFT_CORE.depthMm };
-
+      const size = sizeFor.get(kind)!;
       const origin: Point2 =
         spineCentreY === null
           ? { x: cursorX, y: 0 }
           : { x: cursorX, y: spineCentreY - size.depthMm / 2 };
-      const boundary = rectangleBoundary(origin, size.widthMm, size.depthMm);
-      const roomId = newId<RoomId>('rm');
 
-      // Four walls round the core. A lift shaft in particular is a real
-      // enclosure and its masonry belongs in the quantities.
-      const thickness = kind === 'lift' ? 229 : 114;
-      const wallIds: WallId[] = [];
-      const edges: Array<[Point2, Point2]> = [
-        [
-          { x: origin.x, y: origin.y - thickness / 2 },
-          { x: origin.x + size.widthMm, y: origin.y - thickness / 2 },
-        ],
-        [
-          { x: origin.x, y: origin.y + size.depthMm + thickness / 2 },
-          { x: origin.x + size.widthMm, y: origin.y + size.depthMm + thickness / 2 },
-        ],
-        [
-          { x: origin.x - thickness / 2, y: origin.y },
-          { x: origin.x - thickness / 2, y: origin.y + size.depthMm },
-        ],
-        [
-          { x: origin.x + size.widthMm + thickness / 2, y: origin.y },
-          { x: origin.x + size.widthMm + thickness / 2, y: origin.y + size.depthMm },
-        ],
-      ];
-
-      for (let i = 0; i < edges.length; i++) {
-        const [start, end] = edges[i]!;
-        const id = newId<WallId>('wal');
-        wallIds.push(id);
-        walls.push({
-          id,
-          floorId: floor.id,
-          start,
-          end,
-          thickness,
-          height: floor.clearHeight,
-          function: kind === 'lift' ? 'interior' : 'partition',
-          loadBearing: kind === 'lift',
-          // The first wall of a stair core carries the doorway onto the floor.
-          openings:
-            i === 0
-              ? [
-                  {
-                    id: newId('opn'),
-                    wallId: id,
-                    kind: kind === 'lift' ? ('door' as const) : ('archway' as const),
-                    distanceAlongWall: size.widthMm / 2,
-                    width: Math.min(1100, size.widthMm - 200),
-                    height: 2100,
-                    sillHeight: 0,
-                    isEmergencyExit: kind === 'stair',
-                    provenance: {
-                      confidence: 'inferred' as const,
-                      note: `Access into the ${kind} core.`,
-                    },
-                  },
-                ]
-              : [],
-          provenance: { confidence: 'inferred', note: `${kind} core enclosure.` },
-        });
-      }
-
-      rooms.push({
-        id: roomId,
-        floorId: floor.id,
-        name: kind === 'stair' ? 'Staircase' : 'Lift',
-        use: kind === 'stair' ? 'stair' : 'lift',
-        boundary,
-        clearHeight: floor.clearHeight,
-        boundingWallIds: wallIds,
-        provenance: {
-          confidence: 'inferred',
-          note: `${kind} core generated from the floor-to-floor height.`,
-        },
-      });
-
-      if (kind === 'stair') {
-        const check = deriveStair(floor.floorToFloor);
-        checks.push(check);
-        stairs.push({
-          id: newId<StairId>('str'),
-          floorId: floor.id,
-          name: 'Staircase',
-          footprint: boundary,
-          floorToFloorRise: floor.floorToFloor,
-          treadDepth: check.tread,
-          riserHeight: check.riser,
-          width: size.widthMm,
-          provenance: {
-            confidence: 'inferred',
-            note: `${check.riserCount} risers at ${check.riser.toFixed(0)} mm derived from the floor-to-floor height.`,
-          },
-        });
-      }
+      const built = buildCore(
+        floor,
+        kind,
+        origin,
+        'Generated from the floor-to-floor height.',
+        size,
+      );
+      rooms.push(built.room);
+      walls.push(...built.walls);
+      if (built.stair) stairs.push(built.stair);
+      if (built.check) checks.push(built.check);
 
       cursorX += size.widthMm + 600;
     }

@@ -142,12 +142,15 @@ describe('wall recognition', () => {
     expect(result.floor!.rooms[0]!.use).toBe('bedroom');
   });
 
-  it('ignores dimension strings when naming a room', () => {
+  it('ignores dimension strings when naming a room, and says the space is unnamed', () => {
     // "6000 x 4000" sitting in the middle of a room is a measurement, not a name.
+    // What it becomes matters: calling the space "Room" invents a name that is
+    // on no drawing and cannot be told apart from one that was read, which is
+    // exactly how a floor of twenty spaces all reads as "Room".
     const result = recogniseFloor(
       roomLineWork(6000, 4000, 230, [{ text: '6000 x 4000', at: { x: 3000, y: 2000 }, heightHint: 200 }]),
     );
-    expect(result.floor!.rooms[0]!.name).toBe('Room');
+    expect(result.floor!.rooms[0]!.name).toBe('Unnamed space');
   });
 
   it('refuses to measure anything without a scale', () => {

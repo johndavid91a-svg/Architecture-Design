@@ -41,6 +41,81 @@ type Selection =
 /** Snap increment while dragging. Three inches — a real construction module. */
 const SNAP_MM = 76.2;
 
+/**
+ * How the plan is drawn.
+ *
+ * The first palette here failed the only test that matters: walls at #5d6b7d on
+ * a #0d1116 ground are a contrast ratio of about 2.4:1, and a 1 px grid at
+ * #1a2029 is 1.3:1 — both below the 3:1 floor for a graphical object, so on a
+ * bright screen the drawing simply was not there. The dark palette below puts
+ * walls near white and lifts the room wash and grid until each step is
+ * separable; every value was chosen against the ground it sits on rather than
+ * for its own sake.
+ *
+ * `paper` is the same drawing the way a plan is actually printed: black line
+ * work on white. It is not a novelty — it is the highest-contrast rendering
+ * possible, it matches the sheet the user is comparing against, and it is what
+ * to switch to in a lit room or on a projector.
+ */
+interface Palette {
+  readonly ground: string;
+  readonly gridMinor: string;
+  readonly gridMajor: string;
+  readonly roomFill: string;
+  readonly roomStroke: string;
+  readonly wallBearing: string;
+  readonly wallPartition: string;
+  readonly selection: string;
+  readonly selectionFill: string;
+  readonly door: string;
+  readonly window: string;
+  readonly exit: string;
+  readonly label: string;
+  readonly sublabel: string;
+  /** Painted behind text so a label crossing a wall stays readable. */
+  readonly labelHalo: string;
+  readonly route: string;
+}
+
+const PALETTES: Record<'dark' | 'paper', Palette> = {
+  dark: {
+    ground: '#0b0f14',
+    gridMinor: 'rgba(126,152,184,0.17)',
+    gridMajor: 'rgba(126,152,184,0.34)',
+    roomFill: 'rgba(128,168,214,0.17)',
+    roomStroke: '#7d93ab',
+    wallBearing: '#f4f7fb',
+    wallPartition: '#b3c1d1',
+    selection: '#5cc0ff',
+    selectionFill: 'rgba(92,192,255,0.30)',
+    door: '#ffc14d',
+    window: '#5fd0ff',
+    exit: '#ff6f6a',
+    label: '#ffffff',
+    sublabel: '#c2cfdd',
+    labelHalo: 'rgba(11,15,20,0.88)',
+    route: '95,208,255',
+  },
+  paper: {
+    ground: '#f7f6f3',
+    gridMinor: 'rgba(40,60,80,0.16)',
+    gridMajor: 'rgba(40,60,80,0.32)',
+    roomFill: 'rgba(45,90,140,0.10)',
+    roomStroke: '#5c6a78',
+    wallBearing: '#101418',
+    wallPartition: '#48545f',
+    selection: '#0a6fbd',
+    selectionFill: 'rgba(10,111,189,0.22)',
+    door: '#a86a00',
+    window: '#0d6ea8',
+    exit: '#c22a24',
+    label: '#101418',
+    sublabel: '#465361',
+    labelHalo: 'rgba(247,246,243,0.90)',
+    route: '10,111,189',
+  },
+};
+
 const USES: readonly RoomUse[] = [
   'reception',
   'office',
@@ -92,6 +167,8 @@ export function PlanView({ store }: Props): JSX.Element {
   const [dragging, setDragging] = useState(false);
   const [touring, setTouring] = useState(false);
   const [tourLabel, setTourLabel] = useState('');
+  const [paper, setPaper] = useState(false);
+  const palette = paper ? PALETTES.paper : PALETTES.dark;
 
   const floor: Floor | undefined = floors[Math.min(floorIndex, floors.length - 1)];
 
@@ -157,26 +234,32 @@ export function PlanView({ store }: Props): JSX.Element {
       if (!ctx || !p) return;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = '#0d1116';
+      ctx.fillStyle = palette.ground;
       ctx.fillRect(0, 0, cssW, cssH);
 
       const { tx, ty, scale } = p;
 
-      // ---- Grid at 1 m, drawn only when it will not alias into mush --------
-      if (1000 * scale > 6) {
-        ctx.strokeStyle = '#1a2029';
-        ctx.lineWidth = 1;
+      // ---- Grid, drawn only when it will not alias into mush ---------------
+      // Two weights. A single 1 m grid at a readable strength becomes a solid
+      // field on a 60 m plan; a faint minor grid with a stronger line every 5 m
+      // stays countable at any zoom, which is the point of having it at all.
+      const drawGrid = (stepMm: number, colour: string, width: number) => {
+        if (stepMm * scale <= 6) return;
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = width;
         ctx.beginPath();
-        for (let x = Math.floor(transform.minX / 1000) * 1000; x <= transform.maxX; x += 1000) {
+        for (let x = Math.floor(transform.minX / stepMm) * stepMm; x <= transform.maxX; x += stepMm) {
           ctx.moveTo(tx(x), ty(transform.minY));
           ctx.lineTo(tx(x), ty(transform.maxY));
         }
-        for (let y = Math.floor(transform.minY / 1000) * 1000; y <= transform.maxY; y += 1000) {
+        for (let y = Math.floor(transform.minY / stepMm) * stepMm; y <= transform.maxY; y += stepMm) {
           ctx.moveTo(tx(transform.minX), ty(y));
           ctx.lineTo(tx(transform.maxX), ty(y));
         }
         ctx.stroke();
-      }
+      };
+      drawGrid(1000, palette.gridMinor, 1);
+      drawGrid(5000, palette.gridMajor, 1);
 
       // ---- Rooms ----------------------------------------------------------
       for (const room of floor.rooms) {
@@ -187,21 +270,29 @@ export function PlanView({ store }: Props): JSX.Element {
         });
         ctx.closePath();
         const isSel = selection.kind === 'room' && selection.room.id === room.id;
-        ctx.fillStyle = isSel ? 'rgba(74,163,223,0.22)' : 'rgba(148,168,190,0.07)';
+        ctx.fillStyle = isSel ? palette.selectionFill : palette.roomFill;
         ctx.fill();
-        ctx.strokeStyle = isSel ? '#4aa3df' : '#3a4655';
-        ctx.lineWidth = isSel ? 2 : 1;
+        ctx.strokeStyle = isSel ? palette.selection : palette.roomStroke;
+        ctx.lineWidth = isSel ? 2.5 : 1.25;
         ctx.stroke();
       }
 
       // ---- Walls at true thickness ----------------------------------------
+      // Walls are the drawing. They are drawn brightest of anything on it, and
+      // a wall thinner than 2 px on screen is still given 2 px: at a whole-floor
+      // zoom a 114 mm partition is a third of a pixel, and rounding that down is
+      // how a plan ends up looking empty.
       for (const wall of floor.walls) {
         const isSel = selection.kind === 'wall' && selection.wall.id === wall.id;
         ctx.beginPath();
         ctx.moveTo(tx(wall.start.x), ty(wall.start.y));
         ctx.lineTo(tx(wall.end.x), ty(wall.end.y));
-        ctx.strokeStyle = isSel ? '#4aa3df' : wall.loadBearing ? '#8fa2b8' : '#5d6b7d';
-        ctx.lineWidth = Math.max(1.5, wall.thickness * scale);
+        ctx.strokeStyle = isSel
+          ? palette.selection
+          : wall.loadBearing
+            ? palette.wallBearing
+            : palette.wallPartition;
+        ctx.lineWidth = Math.max(2, wall.thickness * scale);
         ctx.stroke();
       }
 
@@ -222,19 +313,19 @@ export function PlanView({ store }: Props): JSX.Element {
           ctx.beginPath();
           ctx.moveTo(tx(cx - ux * half), ty(cy - uy * half));
           ctx.lineTo(tx(cx + ux * half), ty(cy + uy * half));
-          ctx.strokeStyle = '#0d1116';
-          ctx.lineWidth = Math.max(1.5, wall.thickness * scale) + 1;
+          ctx.strokeStyle = palette.ground;
+          ctx.lineWidth = Math.max(2, wall.thickness * scale) + 2;
           ctx.stroke();
 
           ctx.beginPath();
           ctx.moveTo(tx(cx - ux * half), ty(cy - uy * half));
           ctx.lineTo(tx(cx + ux * half), ty(cy + uy * half));
           ctx.strokeStyle = opening.isEmergencyExit
-            ? '#e0625f'
+            ? palette.exit
             : opening.kind === 'door'
-              ? '#d9a441'
-              : '#5fb0e6';
-          ctx.lineWidth = 3;
+              ? palette.door
+              : palette.window;
+          ctx.lineWidth = 4;
           ctx.stroke();
 
           // ---- Door swing --------------------------------------------------
@@ -255,8 +346,8 @@ export function PlanView({ store }: Props): JSX.Element {
               ctx.beginPath();
               ctx.moveTo(tx(hingeX), ty(hingeY));
               ctx.lineTo(tx(leafX), ty(leafY));
-              ctx.strokeStyle = 'rgba(217,164,65,0.95)';
-              ctx.lineWidth = 2;
+              ctx.strokeStyle = palette.door;
+              ctx.lineWidth = 2.5;
               ctx.stroke();
 
               // Canvas y is inverted relative to model y, so the sweep runs the
@@ -270,17 +361,33 @@ export function PlanView({ store }: Props): JSX.Element {
                 -base + (Math.PI / 2) * swing,
                 false,
               );
-              ctx.strokeStyle = 'rgba(217,164,65,0.35)';
-              ctx.lineWidth = 1;
+              ctx.strokeStyle = palette.door;
+              ctx.globalAlpha = 0.5;
+              ctx.lineWidth = 1.5;
               ctx.setLineDash([4, 3]);
               ctx.stroke();
               ctx.setLineDash([]);
+              ctx.globalAlpha = 1;
             }
           }
         }
       }
 
       // ---- Labels ---------------------------------------------------------
+      // Every label is painted twice: once as a thick stroke in the ground
+      // colour, once as fill. Without the halo a room name crossing a bright
+      // wall is white on white, which is the one place a plan most needs to be
+      // legible — the name sits at the centroid, and on a small room the
+      // centroid is very close to a wall.
+      const write = (text: string, x: number, y: number, colour: string) => {
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = palette.labelHalo;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = colour;
+        ctx.fillText(text, x, y);
+      };
+
       ctx.textAlign = 'center';
       for (const room of floor.rooms) {
         const c = centroid(room.boundary);
@@ -294,23 +401,22 @@ export function PlanView({ store }: Props): JSX.Element {
         // small even for that gets nothing rather than a smear.
         const widthPx = (b.maxX - b.minX) * scale;
         const heightPx = (b.maxY - b.minY) * scale;
-        ctx.font = '600 12px system-ui, sans-serif';
+        ctx.font = '700 13px system-ui, sans-serif';
         const namePx = ctx.measureText(room.name).width;
         const room_ = widthPx > namePx + 8 && heightPx > 46 ? 'full' : heightPx > 14 ? 'name' : 'none';
         if (room_ === 'none') continue;
 
-        ctx.fillStyle = '#e6eaf0';
-        ctx.fillText(room.name, tx(c.x), ty(c.y) - (room_ === 'full' ? 6 : -4));
+        write(room.name, tx(c.x), ty(c.y) - (room_ === 'full' ? 6 : -4), palette.label);
         if (room_ !== 'full') continue;
 
-        ctx.fillStyle = '#97a3b4';
         ctx.font = '11px ui-monospace, monospace';
-        ctx.fillText(
+        write(
           `${formatLength(b.maxX - b.minX, 'ft', { imperialInches: true })} × ${formatLength(b.maxY - b.minY, 'ft', { imperialInches: true })}`,
           tx(c.x),
           ty(c.y) + 10,
+          palette.sublabel,
         );
-        ctx.fillText(`${areaSqft.toFixed(0)} sq ft`, tx(c.x), ty(c.y) + 24);
+        write(`${areaSqft.toFixed(0)} sq ft`, tx(c.x), ty(c.y) + 24, palette.sublabel);
       }
 
       // ---- The walk -------------------------------------------------------
@@ -324,7 +430,7 @@ export function PlanView({ store }: Props): JSX.Element {
           if (i === 0) ctx.moveTo(tx(pt.x), ty(pt.y));
           else ctx.lineTo(tx(pt.x), ty(pt.y));
         });
-        ctx.strokeStyle = 'rgba(95,176,230,0.25)';
+        ctx.strokeStyle = `rgba(${palette.route},0.45)`;
         ctx.lineWidth = 2;
         ctx.setLineDash([8, 6]);
         ctx.stroke();
@@ -343,17 +449,17 @@ export function PlanView({ store }: Props): JSX.Element {
             ctx.lineTo(tx(a.x + (b.x - a.x) * t), ty(a.y + (b.y - a.y) * t));
             drawn += seg;
           }
-          ctx.strokeStyle = 'rgba(95,176,230,0.9)';
-          ctx.lineWidth = 3;
+          ctx.strokeStyle = `rgba(${palette.route},1)`;
+          ctx.lineWidth = 3.5;
           ctx.stroke();
 
           // Where the walker is now.
           const here = tourPointAt(tour, walked);
           ctx.beginPath();
           ctx.arc(tx(here.at.x), ty(here.at.y), 7, 0, Math.PI * 2);
-          ctx.fillStyle = '#5fb0e6';
+          ctx.fillStyle = `rgb(${palette.route})`;
           ctx.fill();
-          ctx.strokeStyle = '#0d1116';
+          ctx.strokeStyle = palette.ground;
           ctx.lineWidth = 2;
           ctx.stroke();
         }
@@ -372,7 +478,7 @@ export function PlanView({ store }: Props): JSX.Element {
       registerCanvas('plan', null);
       observer.disconnect();
     };
-  }, [floor, transform, selection, projection, tour]);
+  }, [floor, transform, selection, projection, tour, palette]);
 
   /**
    * Walk the route.
@@ -584,6 +690,24 @@ export function PlanView({ store }: Props): JSX.Element {
           {floor.name}
         </div>
 
+        <label style={{ marginTop: 10 }}>Contrast</label>
+        <div className="row">
+          <button
+            className={paper ? 'ghost' : 'primary'}
+            onClick={() => setPaper(false)}
+            title="Bright line work on a dark ground"
+          >
+            Dark
+          </button>
+          <button
+            className={paper ? 'primary' : 'ghost'}
+            onClick={() => setPaper(true)}
+            title="Black line work on white, the way the sheet is printed — the highest contrast available"
+          >
+            Paper
+          </button>
+        </div>
+
         <label style={{ marginTop: 10 }}>Circulation</label>
         <div className="row">
           <button
@@ -645,9 +769,9 @@ export function PlanView({ store }: Props): JSX.Element {
 
       <div className="overlay bl">
         <div className="small">
-          <span style={{ color: '#d9a441' }}>▬</span> door &nbsp;
-          <span style={{ color: '#5fb0e6' }}>▬</span> window &nbsp;
-          <span style={{ color: '#e0625f' }}>▬</span> emergency exit
+          <span style={{ color: palette.door }}>▬</span> door &nbsp;
+          <span style={{ color: palette.window }}>▬</span> window &nbsp;
+          <span style={{ color: palette.exit }}>▬</span> emergency exit
         </div>
         <div className="small muted" style={{ marginTop: 4 }}>
           Walls at true thickness. Grid = 1 m.

@@ -115,7 +115,26 @@ npm run typecheck --workspace @adp/desktop
 node tools/scenarios.mjs                   # generated buildings, Pakistani plots
 node tools/space-centre-check.mjs          # the worked design
 node tools/test-main-import.mjs            # the real main-process import path
+node tools/circulation-check.mjs           # a way in and a way up, on an import
 npx electron tools/test-planning-persistence.cjs
+
+# The screens, actually rendered and actually looked at:
+xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+  npx electron --no-sandbox tools/ui-journey.mjs <output-dir>
 ```
 
 Run the lot before claiming anything is done, and say plainly what was not run.
+
+## Two traps that make a broken view look fine
+
+**A hidden window does not repaint.** `capturePage` on a `show: false`
+BrowserWindow returns the last frame that was composited, so a whole set of
+screenshots can show the *previous* screen — every one plausible, every one a
+lie. `show: true` (Xvfb makes that free) and `backgroundThrottling: false`.
+
+**Assert the state, not just the pixels.** "I clicked the button and took a
+picture" passes whether or not the button did anything. Read something back:
+which mode is active, which floor you are on, what the status line says. The
+lift test presses E and then checks the floor **changed** — pressing E while
+standing somewhere that is not a lift, and calling that a pass, is how a broken
+lift ships.

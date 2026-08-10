@@ -3,8 +3,10 @@ import * as THREE from 'three';
 import {
   boundsOf,
   centroid,
+  findEntrances,
   findFurniture,
   findMaterial,
+  justInside,
   landingFor,
   PAKISTAN_LOCATIONS,
   polygonArea,
@@ -49,6 +51,43 @@ const COLLISION_RADIUS_MM = 300;
 const MM = 0.001; // millimetres to scene metres
 
 /**
+ * Lift timings, in seconds.
+ *
+ * A passenger lift in a low-rise building runs at about 1 m/s and its doors
+ * take a second or so each way. Using the real figures rather than snapping
+ * instantly between floors is not decoration: the time a lift takes is the
+ * reason a building needs two of them, and a ride that takes no time hides that
+ * completely.
+ */
+const LIFT_SPEED_M_PER_S = 1.2;
+const LIFT_DOOR_S = 1.1;
+const LIFT_MIN_TRAVEL_S = 1.0;
+/** How long a flight of stairs takes to climb. Slower than a lift, as it is. */
+const STAIR_CLIMB_S = 2.4;
+
+/** A stack of lift landings that share a shaft, and the car that runs in it. */
+interface Shaft {
+  readonly at: { x: number; y: number };
+  readonly levels: readonly number[];
+  readonly car: THREE.Group;
+  /** Which level the car is parked at when nobody is riding. */
+  current: number;
+}
+
+/** A journey in progress: a lift ride or a flight of stairs. */
+interface Ride {
+  readonly kind: 'lift' | 'stair';
+  readonly shaft: Shaft | null;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly fromY: number;
+  readonly toY: number;
+  readonly at: { x: number; y: number };
+  readonly startedAt: number;
+  readonly travelS: number;
+}
+
+/**
  * 3D digital twin, walkthrough and daylight.
  *
  * Geometry is extruded from the architecture layer on every load — there is no
@@ -74,6 +113,12 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const [sunInfo, setSunInfo] = useState('');
   const [prompt, setPrompt] = useState<{ label: string; up: boolean; down: boolean } | null>(null);
   const [cinematic, setCinematic] = useState<Cinematic>('none');
+  /** Show only the selected storey, so a floor can be read on its own. */
+  const [isolate, setIsolate] = useState(false);
+  /** Wayfinding signs over the entrance, the stairs and the lifts. */
+  const [showSigns, setShowSigns] = useState(true);
+  /** What the lift is doing right now, for the on-screen indicator. */
+  const [riding, setRiding] = useState('');
 
   /**
    * Cinematic state, read by the render loop each frame.
@@ -92,13 +137,27 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const coresRef = useRef(cores);
   coresRef.current = cores;
 
+  const entrances = useMemo(() => findEntrances(floors), [floors]);
+  const entrancesRef = useRef(entrances);
+  entrancesRef.current = entrances;
+
   // Set by the render loop when the walker should be moved to another floor.
   const teleportRef = useRef<{ level: number; at: { x: number; y: number } } | null>(null);
+  /** A lift ride or a stair climb in progress. Null when standing still. */
+  const rideRef = useRef<Ride | null>(null);
+  /** Set from the UI to send the walker to the front door. */
+  const goToEntranceRef = useRef(false);
+  /** Set from the UI to stand the walker in the stair or the lift. */
+  const goToCoreRef = useRef<'stair' | 'lift' | null>(null);
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const floorIndexRef = useRef(floorIndex);
   floorIndexRef.current = floorIndex;
+  const isolateRef = useRef(isolate);
+  isolateRef.current = isolate;
+  const signsRef = useRef(showSigns);
+  signsRef.current = showSigns;
 
   // Sun state is read by the render loop each frame rather than triggering a
   // scene rebuild, so dragging the time slider is smooth.
@@ -286,25 +345,10 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           }
         }
 
-        // ---- Lift car, so the shaft reads as a lift ------------------------
-        if (room.use === 'lift') {
-          const rb = boundsOf(room.boundary);
-          const car = new THREE.Mesh(
-            new THREE.BoxGeometry(
-              (rb.maxX - rb.minX - 300) * MM,
-              2200 * MM,
-              (rb.maxY - rb.minY - 300) * MM,
-            ),
-            new THREE.MeshStandardMaterial({ color: 0x5b6672, roughness: 0.35, metalness: 0.5 }),
-          );
-          car.position.set(
-            ((rb.minX + rb.maxX) / 2) * MM,
-            elevation + 1100 * MM,
-            -((rb.minY + rb.maxY) / 2) * MM,
-          );
-          car.castShadow = true;
-          floorGroup.add(car);
-        }
+        // The lift car is deliberately NOT built here. One car per floor gives
+        // nine cars in a nine-storey shaft, all of them solid, none of them
+        // moving — you cannot ride a lift that is already on every floor. The
+        // car belongs to the shaft, not to the storey, and is built once below.
 
         // ---- Furniture from the design layer -----------------------------
         for (const item of rd?.furniture ?? []) {
@@ -416,6 +460,265 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       }
     }
 
+    // ---- Wayfinding ------------------------------------------------------
+    //
+    // Standing inside a building you have never been in, the two things you need
+    // to be told are where the way out is and where the stairs are. A model that
+    // renders every wall perfectly and answers neither is unusable — which is
+    // what this was: the lift was a solid block repeated on every floor, the
+    // stair was unmarked, and the entrance was one dark rectangle among sixty.
+    //
+    // Signs are drawn with `depthTest: false`, so they read THROUGH the walls
+    // between you and them. That is not a rendering mistake; it is the whole
+    // point. In a real building the sign is round the corner and you find it by
+    // walking; in a model you are trying to understand a plan, and being able to
+    // see that the lift is behind that wall is the thing you came for.
+    const signGroup = new THREE.Group();
+    scene.add(signGroup);
+    const signsForLevel = new Map<number, THREE.Object3D[]>();
+
+    /**
+     * Signs to hide when you are standing on top of them.
+     *
+     * Everything here draws with `depthTest: false`, which is what lets a sign
+     * be seen through a wall — and which means a marker the camera is *inside*
+     * paints over the entire frame. Walking into the staircase filled the screen
+     * with flat green and walking into the lift filled it with flat blue: the
+     * beacon, at zero distance, covering the building. A marker you are standing
+     * in has also finished its job, so it is hidden.
+     */
+    const nearHide: Array<{ object: THREE.Object3D; at: { x: number; y: number } }> = [];
+    const HIDE_WITHIN_M = 3;
+
+    const makeSign = (text: string, background: string, foreground: string): THREE.Sprite => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 160;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, 512, 160);
+      ctx.strokeStyle = foreground;
+      ctx.lineWidth = 10;
+      ctx.strokeRect(5, 5, 502, 150);
+      ctx.fillStyle = foreground;
+      ctx.font = '700 82px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 256, 84);
+
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(canvas),
+          depthTest: false,
+          depthWrite: false,
+          transparent: true,
+          // Constant size on screen, not in the world.
+          //
+          // A 3 m-wide world-space sign is a readable plate from across the
+          // floor and a wall of colour from three metres away — standing at the
+          // foot of the stairs, STAIR and LIFT covered half the building. A
+          // wayfinding label wants the opposite behaviour from a wall: the same
+          // size wherever you are, so it stays legible far off and stays out of
+          // the way close to.
+          sizeAttenuation: false,
+        }),
+      );
+      // Drawn after everything else so it is never overpainted by geometry.
+      sprite.renderOrder = 10;
+      // Fractions of the viewport, at the canvas's 3.2 : 1 aspect.
+      sprite.scale.set(0.17, 0.053, 1);
+      return sprite;
+    };
+
+    /** A column of light marking a spot from across the floor. */
+    const makeBeacon = (hex: number, heightM: number): THREE.Mesh => {
+      const beacon = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.09, heightM, 8, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: hex,
+          transparent: true,
+          opacity: 0.4,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      );
+      beacon.renderOrder = 9;
+      return beacon;
+    };
+
+    const addSign = (level: number, object: THREE.Object3D) => {
+      signGroup.add(object);
+      const list = signsForLevel.get(level);
+      if (list) list.push(object);
+      else signsForLevel.set(level, [object]);
+    };
+
+    const elevationOf = new Map(floors.map((f) => [f.level, f.elevation * MM]));
+    const cores = transportPoints(floors);
+
+    for (const core of cores) {
+      const base = elevationOf.get(core.level) ?? 0;
+      const sign = makeSign(
+        core.kind === 'stair' ? 'STAIRS' : 'LIFT',
+        core.kind === 'stair' ? '#1d7a3f' : '#0f5f9e',
+        '#ffffff',
+      );
+      sign.position.set(core.at.x * MM, base + 2.35, -core.at.y * MM);
+      addSign(core.level, sign);
+      nearHide.push({ object: sign, at: core.at });
+
+      const beacon = makeBeacon(core.kind === 'stair' ? 0x39d97a : 0x4fb8ff, 2.6);
+      beacon.position.set(core.at.x * MM, base + 1.3, -core.at.y * MM);
+      addSign(core.level, beacon);
+      nearHide.push({ object: beacon, at: core.at });
+    }
+
+    // ---- The way in ------------------------------------------------------
+    // The entrance gets a sign on both sides of the door — one facing the
+    // street so you can find the building, one inside so you can find your way
+    // back out — and a mat on the ground, because from an orbit view a sign
+    // edge-on is a line and the mat is what you actually see.
+    const entranceList = findEntrances(floors);
+    const mainEntrance = entranceList[0];
+    const entranceSigns: THREE.Object3D[] = [];
+    const addEntranceSign = (object: THREE.Object3D) => {
+      signGroup.add(object);
+      entranceSigns.push(object);
+    };
+    for (const entrance of entranceList.slice(0, 3)) {
+      const base = elevationOf.get(entrance.level) ?? 0;
+      const isMain = entrance === mainEntrance;
+      const sign = makeSign(
+        isMain ? 'ENTRANCE' : 'EXIT',
+        isMain ? '#b8860b' : '#8e2f2c',
+        '#ffffff',
+      );
+      if (isMain) sign.scale.set(0.24, 0.075, 1);
+      sign.position.set(entrance.at.x * MM, base + 2.9, -entrance.at.y * MM);
+      addEntranceSign(sign);
+      nearHide.push({ object: sign, at: entrance.at });
+
+      const outside = {
+        x: entrance.at.x - entrance.inward.x * 1400,
+        y: entrance.at.y - entrance.inward.y * 1400,
+      };
+      const mat = new THREE.Mesh(
+        new THREE.PlaneGeometry((entrance.widthMm + 1200) * MM, 2600 * MM),
+        new THREE.MeshBasicMaterial({
+          color: isMain ? 0xe6a72c : 0xd05a55,
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+        }),
+      );
+      mat.rotation.x = -Math.PI / 2;
+      mat.rotation.z = Math.atan2(entrance.inward.x, entrance.inward.y);
+      mat.position.set(outside.x * MM, base + 0.02, -outside.y * MM);
+      addEntranceSign(mat);
+
+      // A frame round the opening itself, so the doorway reads as a doorway
+      // from outside rather than as a slightly darker patch of wall.
+      const frame = new THREE.Mesh(
+        new THREE.BoxGeometry((entrance.widthMm + 300) * MM, 2.6, 0.12),
+        new THREE.MeshBasicMaterial({
+          color: isMain ? 0xffc14d : 0xff6f6a,
+          transparent: true,
+          opacity: 0.28,
+        }),
+      );
+      frame.position.set(entrance.at.x * MM, base + 1.3, -entrance.at.y * MM);
+      frame.rotation.y = Math.atan2(entrance.inward.x, entrance.inward.y);
+      addEntranceSign(frame);
+    }
+
+    // ---- Lift cars, one per shaft ----------------------------------------
+    // Landings within two metres of each other on different floors are the same
+    // shaft. One car is built for it and parked at its lowest landing; the ride
+    // below moves that car, so from outside the building you watch it travel.
+    const shafts: Shaft[] = [];
+    for (const core of cores) {
+      if (core.kind !== 'lift') continue;
+      const existing = shafts.find((s) => Math.hypot(s.at.x - core.at.x, s.at.y - core.at.y) < 2000);
+      if (existing) {
+        (existing.levels as number[]).push(core.level);
+        continue;
+      }
+      shafts.push({ at: core.at, levels: [core.level], car: new THREE.Group(), current: core.level });
+    }
+
+    const carShell = new THREE.MeshStandardMaterial({
+      color: 0xb9c2cc,
+      roughness: 0.25,
+      metalness: 0.65,
+      side: THREE.DoubleSide,
+    });
+    for (const shaft of shafts) {
+      (shaft.levels as number[]).sort((a, b) => a - b);
+      shaft.current = shaft.levels[0]!;
+
+      const w = 1.6;
+      const d = 1.8;
+      const h = 2.2;
+      // Floor, ceiling, three walls: the fourth side (+Z, which is the doorway
+      // wall in plan) is left open, so the car reads as something you step into
+      // rather than a solid block.
+      const plate = new THREE.Mesh(
+        new THREE.BoxGeometry(w, 0.06, d),
+        new THREE.MeshStandardMaterial({ color: 0x4a4f55, roughness: 0.85 }),
+      );
+      plate.position.y = 0.03;
+      shaft.car.add(plate);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), carShell);
+      roof.position.y = h;
+      shaft.car.add(roof);
+      for (const [x, z, rot] of [
+        [0, -d / 2, 0],
+        [-w / 2, 0, Math.PI / 2],
+        [w / 2, 0, Math.PI / 2],
+      ] as const) {
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(rot === 0 ? w : d, h), carShell);
+        panel.position.set(x, h / 2, z);
+        panel.rotation.y = rot;
+        shaft.car.add(panel);
+      }
+
+      // A handrail on the back wall. Without it the interior is three untextured
+      // planes, and a flat grey field at arm's length is indistinguishable from
+      // a rendering failure — which is exactly how it read before.
+      const rail = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, w * 0.8, 8),
+        new THREE.MeshStandardMaterial({ color: 0xd8dde3, roughness: 0.2, metalness: 0.8 }),
+      );
+      rail.rotation.z = Math.PI / 2;
+      rail.position.set(0, 0.95, -d / 2 + 0.07);
+      shaft.car.add(rail);
+
+      // The car light, so you can tell from outside which floor the car is on.
+      const lamp = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 0.7, d * 0.7),
+        new THREE.MeshBasicMaterial({ color: 0xfff4d6, transparent: true, opacity: 0.9 }),
+      );
+      lamp.rotation.x = Math.PI / 2;
+      lamp.position.y = h - 0.08;
+      shaft.car.add(lamp);
+
+      // And a light that actually lights it. The sun cannot reach inside a
+      // shaft, so without this the interior is lit by hemisphere ambient alone
+      // and every surface returns the same value: a uniform wash with no edges,
+      // no shading and no way to tell you are in a lift at all.
+      const bulb = new THREE.PointLight(0xfff0d0, 6, 6, 2);
+      bulb.position.set(0, h - 0.2, 0);
+      shaft.car.add(bulb);
+
+      shaft.car.position.set(
+        shaft.at.x * MM,
+        elevationOf.get(shaft.current) ?? 0,
+        -shaft.at.y * MM,
+      );
+      building.add(shaft.car);
+    }
+
     // ---- Ground ----------------------------------------------------------
     const modelBounds = boundsOf(allPoints);
     const spanX = (modelBounds.maxX - modelBounds.minX) * MM;
@@ -521,6 +824,8 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       if (modeRef.current !== 'walk') return;
       if (e.code !== 'KeyE' && e.code !== 'KeyQ') return;
 
+      if (rideRef.current) return; // already travelling
+
       const floor = floors[floorIndexRef.current];
       if (!floor) return;
       const here = { x: walkPos.x / MM, y: -walkPos.z / MM };
@@ -533,7 +838,32 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
 
       const targetIndex = floors.findIndex((f) => f.level === targetLevel);
       if (targetIndex < 0) return;
-      teleportRef.current = { level: targetIndex, at: landing.at };
+
+      // ---- Ride it, do not teleport ----------------------------------------
+      // Snapping between floors made the lift indistinguishable from a cheat
+      // key. Travelling takes the time it takes: the car moves, you move with
+      // it, and the floor you arrive on is the one the doors open onto.
+      const fromY = (floor.elevation ?? 0) * MM;
+      const toY = (floors[targetIndex]!.elevation ?? 0) * MM;
+      const shaft =
+        core.kind === 'lift'
+          ? shafts.find((s) => Math.hypot(s.at.x - core.at.x, s.at.y - core.at.y) < 2000) ?? null
+          : null;
+
+      rideRef.current = {
+        kind: core.kind,
+        shaft,
+        fromIndex: floorIndexRef.current,
+        toIndex: targetIndex,
+        fromY,
+        toY,
+        at: core.kind === 'lift' ? core.at : landing.at,
+        startedAt: performance.now(),
+        travelS:
+          core.kind === 'lift'
+            ? Math.max(LIFT_MIN_TRAVEL_S, Math.abs(toY - fromY) / LIFT_SPEED_M_PER_S)
+            : STAIR_CLIMB_S,
+      };
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
 
@@ -571,6 +901,60 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       }
       position.x = p.x * MM;
       position.z = -p.y * MM;
+    };
+
+    /**
+     * Which storeys and which signs are on screen.
+     *
+     * "Isolate" is the answer to looking at a nine-storey stack and being able
+     * to read none of it: everything but the selected storey is hidden, so the
+     * floor you picked is the floor you see, on its own, from any angle. It is
+     * one function rather than three because floor visibility, sign visibility
+     * and the entrance markers all have to agree — a LIFT sign floating over a
+     * hidden storey is worse than no sign.
+     */
+    /** Hide any through-wall marker the camera is standing inside. */
+    const hideMarkersUnderfoot = (position: THREE.Vector3) => {
+      if (!signsRef.current) return;
+      const here = { x: position.x / MM, y: -position.z / MM };
+      for (const marker of nearHide) {
+        if (!marker.object.visible && marker.object.userData.nearHidden !== true) continue;
+        const close = Math.hypot(marker.at.x - here.x, marker.at.y - here.y) * MM < HIDE_WITHIN_M;
+        // Remember that *this* rule hid it, so the floor rule can still show it
+        // again when you walk away — and cannot be overridden by it either.
+        if (close) {
+          marker.object.visible = false;
+          marker.object.userData.nearHidden = true;
+        } else if (marker.object.userData.nearHidden === true) {
+          marker.object.userData.nearHidden = false;
+          marker.object.visible = true;
+        }
+      }
+    };
+
+    const applyFloorVisibility = () => {
+      const selected = floors[floorIndexRef.current];
+      const only = isolateRef.current ? selected?.level : undefined;
+
+      for (const [level, group] of floorGroups) {
+        group.visible = only === undefined || level === only;
+      }
+      for (const shaft of shafts) {
+        // The car is hidden with its storey only when isolating; otherwise it
+        // travels the full height of the building and belongs to all of them.
+        shaft.car.visible = only === undefined || shaft.levels.includes(only);
+      }
+
+      const signsOn = signsRef.current;
+      // Signs for the storey you are on. Showing all nine at once — and they
+      // draw through walls — turns the model into a wall of labels.
+      for (const [level, list] of signsForLevel) {
+        for (const object of list) object.visible = signsOn && level === selected?.level;
+      }
+      for (const object of entranceSigns) {
+        object.visible =
+          signsOn && (only === undefined || only === (mainEntrance?.level ?? 0));
+      }
     };
 
     let raf = 0;
@@ -631,10 +1015,8 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       const cine = cinematicRef.current;
       if (cine.kind === 'none') {
         cine.startedAt = 0;
-        for (const [, group] of floorGroups) {
-          group.position.y = 0;
-          group.visible = true;
-        }
+        for (const [, group] of floorGroups) group.position.y = 0;
+        applyFloorVisibility();
       } else if (modeRef.current === 'orbit') {
         // Wall clock, not accumulated `dt`.
         //
@@ -667,10 +1049,8 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           if (cine.elapsed > total) {
             // Settle exactly, then stop: an animation that ends near-but-not-at
             // its target leaves the model a few centimetres out of place.
-            for (const [, group] of floorGroups) {
-              group.position.y = 0;
-              group.visible = true;
-            }
+            for (const [, group] of floorGroups) group.position.y = 0;
+            applyFloorVisibility();
             cinematicRef.current.kind = 'none';
             setCinematic('none');
           }
@@ -697,6 +1077,118 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           floorIndexRef.current = jump.level;
           walkPos.x = jump.at.x * MM;
           walkPos.z = -jump.at.y * MM;
+          applyFloorVisibility();
+        }
+
+        // ---- Standing at the front door ------------------------------------
+        if (goToEntranceRef.current) {
+          goToEntranceRef.current = false;
+          const entrance = entrancesRef.current[0];
+          if (entrance) {
+            const index = floors.findIndex((f) => f.level === entrance.level);
+            if (index >= 0) {
+              setFloorIndex(index);
+              floorIndexRef.current = index;
+            }
+            const spot = justInside(entrance);
+            walkPos.x = spot.x * MM;
+            walkPos.z = -spot.y * MM;
+            // Face into the building rather than at the door you just came
+            // through. Scene Z is -plan Y, so the plan's inward vector becomes
+            // this yaw.
+            yaw = Math.atan2(entrance.inward.x, -entrance.inward.y);
+            pitch = 0;
+            applyFloorVisibility();
+          }
+        }
+
+        // ---- Standing in the stair or the lift -----------------------------
+        // "Where are the stairs?" is not a question you should have to answer by
+        // wandering a nine-storey model. The sign says where they are; this
+        // stands you in them.
+        const wanted = goToCoreRef.current;
+        if (wanted) {
+          goToCoreRef.current = null;
+          const floor = floors[floorIndexRef.current];
+          const core =
+            coresRef.current.find((c) => c.kind === wanted && c.level === floor?.level) ??
+            coresRef.current.find((c) => c.kind === wanted);
+          if (core) {
+            const index = floors.findIndex((f) => f.level === core.level);
+            if (index >= 0) {
+              setFloorIndex(index);
+              floorIndexRef.current = index;
+            }
+            walkPos.x = core.at.x * MM;
+            // In a lift you stand in the middle of the car. On a stair you stand
+            // at the bottom of the flight, not half way up it — the centre of a
+            // stair core is inside the treads, which puts the camera in the
+            // middle of a staircase looking at the underside of a step.
+            const halfDepth = core.radiusMm - 900;
+            const y = core.kind === 'stair' ? core.at.y - halfDepth + 900 : core.at.y;
+            walkPos.z = -y * MM;
+            // Face the way the core is used, not wherever you happened to be
+            // looking. A core's doorway is on its low-y wall, which is scene +Z,
+            // so yaw 0 looks out of the lift; a stair flight runs the other way,
+            // so yaw π looks up it. Arriving nose-first against a blank panel
+            // makes a working lift look like a rendering failure.
+            yaw = core.kind === 'lift' ? 0 : Math.PI;
+            pitch = core.kind === 'stair' ? 0.25 : 0;
+            applyFloorVisibility();
+          }
+        }
+
+        // ---- A ride in progress --------------------------------------------
+        // While travelling, the walker is a passenger: WASD does nothing, the
+        // camera is carried, and the floor index changes when the doors open —
+        // not when the button was pressed.
+        const ride = rideRef.current;
+        if (ride) {
+          const elapsed = (now - ride.startedAt) / 1000;
+          const doorS = ride.kind === 'lift' ? LIFT_DOOR_S : 0;
+          const total = doorS + ride.travelS + doorS;
+          const travelT = Math.max(0, Math.min(1, (elapsed - doorS) / ride.travelS));
+          // Ease in and out: a lift accelerates away and decelerates in, and a
+          // linear ramp is the one thing that reads as fake.
+          const eased = travelT < 0.5 ? 2 * travelT * travelT : 1 - Math.pow(-2 * travelT + 2, 2) / 2;
+          const y = ride.fromY + (ride.toY - ride.fromY) * eased;
+
+          if (ride.shaft) ride.shaft.car.position.y = y;
+          walkPos.x = ride.at.x * MM;
+          walkPos.z = -ride.at.y * MM;
+          walkPos.y = y + EYE_HEIGHT_MM * MM;
+
+          if (sunFrame % 6 === 0) {
+            setRiding(
+              ride.kind === 'lift'
+                ? elapsed < doorS
+                  ? 'Doors closing…'
+                  : travelT < 1
+                    ? `Lift — ${floors[ride.toIndex]?.name ?? ''}`
+                    : 'Doors opening…'
+                : `Climbing to ${floors[ride.toIndex]?.name ?? ''}`,
+            );
+          }
+
+          if (elapsed >= total) {
+            if (ride.shaft) ride.shaft.current = floors[ride.toIndex]?.level ?? ride.shaft.current;
+            rideRef.current = null;
+            setRiding('');
+            setFloorIndex(ride.toIndex);
+            floorIndexRef.current = ride.toIndex;
+            applyFloorVisibility();
+          }
+
+          hideMarkersUnderfoot(walkPos);
+          camera.position.copy(walkPos);
+          camera.lookAt(
+            walkPos.x + Math.sin(yaw) * Math.cos(pitch),
+            walkPos.y + Math.sin(pitch),
+            walkPos.z + Math.cos(yaw) * Math.cos(pitch),
+          );
+          renderer.render(scene, camera);
+          raf = requestAnimationFrame(tick);
+          return;
         }
 
         const floor = floors[floorIndexRef.current];
@@ -732,6 +1224,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           }
         }
 
+        hideMarkersUnderfoot(walkPos);
         camera.position.copy(walkPos);
         camera.lookAt(
           walkPos.x + Math.sin(yaw) * Math.cos(pitch),
@@ -745,10 +1238,14 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     };
     tick();
 
+    const stairCount = new Set(cores.filter((c) => c.kind === 'stair').map((c) => c.level)).size;
     setStatus(
       `${floors.length} floor(s), ${floors.reduce((n, f) => n + f.rooms.length, 0)} rooms, ` +
         `${floors.reduce((n, f) => n + f.walls.length, 0)} walls, ` +
-        `${furnitureMeshes.length} furniture item(s) from the design layer.`,
+        `${furnitureMeshes.length} furniture item(s) from the design layer. ` +
+        (shafts.length > 0
+          ? `${shafts.length} lift shaft(s) and a stair on ${stairCount} storey(s) — walk into one and press E or Q to ride it.`
+          : 'No stair or lift is modelled, so the walkthrough cannot change floor.'),
     );
 
     // Expose the toggles to the outer component without rebuilding the scene.
@@ -758,11 +1255,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     };
     visibilityRef.current = applyVisibility;
     applyVisibility(showCeilings, showFurniture);
+    refreshRef.current = applyFloorVisibility;
+    applyFloorVisibility();
 
     return () => {
       cacheFrame('model');
       registerCanvas('model', null);
       visibilityRef.current = null;
+      refreshRef.current = null;
+      rideRef.current = null;
       cancelAnimationFrame(raf);
       observer.disconnect();
       el.removeEventListener('pointerdown', onPointerDown);
@@ -791,6 +1292,12 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   useEffect(() => {
     visibilityRef.current?.(showCeilings, showFurniture);
   }, [showCeilings, showFurniture]);
+
+  /** Re-apply floor isolation and signage without rebuilding the scene. */
+  const refreshRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    refreshRef.current?.();
+  }, [isolate, showSigns, floorIndex]);
 
   const totalArea = useMemo(
     () => floors.reduce((sum, f) => sum + f.rooms.reduce((s, r) => s + polygonArea(r.boundary) / 92_903.04, 0), 0),
@@ -837,6 +1344,20 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             <div className="small muted" style={{ marginTop: 4 }}>
               {floors[floorIndex]?.name}
             </div>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+              <input
+                type="checkbox"
+                checked={isolate}
+                onChange={(e) => setIsolate(e.target.checked)}
+                style={{ width: 'auto' }}
+              />
+              <span className="small">Only this floor</span>
+            </label>
+            <div className="small muted">
+              {isolate
+                ? `Showing ${floors[floorIndex]?.name ?? 'one storey'} on its own. Every other storey is hidden.`
+                : 'The whole stack is shown. Tick to read one storey at a time.'}
+            </div>
           </>
         )}
 
@@ -874,6 +1395,62 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
               ? 'Orbiting — drag or switch to Walk to take back control.'
               : 'Presentation only; neither changes the model.'}
         </div>
+
+        <label style={{ marginTop: 10 }}>Finding your way</label>
+        <div className="row">
+          <button
+            className="ghost"
+            disabled={entrances.length === 0}
+            onClick={() => {
+              setMode('walk');
+              goToEntranceRef.current = true;
+            }}
+            title={
+              entrances.length > 0
+                ? `Stand just inside the main entrance, facing in — ${entrances[0]!.basis}`
+                : 'No door on the perimeter of the lowest storey, so there is no entrance to go to'
+            }
+          >
+            Go to entrance
+          </button>
+          <button
+            className="ghost"
+            disabled={!cores.some((c) => c.kind === 'stair')}
+            onClick={() => {
+              setMode('walk');
+              goToCoreRef.current = 'stair';
+            }}
+            title="Stand in the staircase. Press E to go up, Q to go down."
+          >
+            Go to stairs
+          </button>
+          <button
+            className="ghost"
+            disabled={!cores.some((c) => c.kind === 'lift')}
+            onClick={() => {
+              setMode('walk');
+              goToCoreRef.current = 'lift';
+            }}
+            title="Stand in the lift car. Press E to go up, Q to go down — it takes the time it takes."
+          >
+            Go to lift
+          </button>
+        </div>
+        <div className="small muted" style={{ marginTop: 4 }}>
+          {entrances.length > 0
+            ? `${entrances.length} way(s) in. The widest is marked ENTRANCE; the rest are marked EXIT.`
+            : 'No entrance could be identified: no door sits on the perimeter of the lowest storey.'}
+        </div>
+
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={showSigns}
+            onChange={(e) => setShowSigns(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          <span className="small">Show signs (STAIRS, LIFT, ENTRANCE)</span>
+        </label>
 
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
           <input
@@ -979,7 +1556,13 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         </div>
       </div>
 
-      {prompt && mode === 'walk' && (
+      {riding && mode === 'walk' && (
+        <div className="transport-prompt">
+          <strong>{riding}</strong>
+        </div>
+      )}
+
+      {prompt && mode === 'walk' && !riding && (
         <div className="transport-prompt">
           <strong>{prompt.label}</strong>
           <div className="small" style={{ marginTop: 4 }}>

@@ -39,6 +39,7 @@ import {
   type WallId,
 } from '../model/ids.js';
 import { emptyDesign } from '../model/design.js';
+import { fitCores, hasVerticalCirculation } from '../model/core-placement.js';
 import { recomputeBoundingWalls } from '../model/edit.js';
 import type { Project } from '../project.js';
 import { SANITY, type CandidateFloor, type DrawingImportResult, type ImportIssue } from './contract.js';
@@ -270,11 +271,44 @@ export function materialise(spec: MaterialiseSpec, now: string): MaterialiseResu
     });
   }
 
+  // ---- A building has to have a way between its floors --------------------
+  //
+  // A drawing import produces no staircase and no lift. The recogniser labels a
+  // room `stair` only when the word lands inside a polygon it closed, and on a
+  // dense commercial plan — where the stair is a run of tread lines that breaks
+  // every face around it — it usually does not. A nine-storey building then
+  // imports with no way up: the walkthrough cannot change floor, and the takeoff
+  // misses a lift shaft's masonry on every storey.
+  //
+  // So a core is fitted and *declared*. The elements it creates are `inferred`,
+  // and the issue below is `review` rather than `info` because this is the app's
+  // geometry, not the user's drawing, and they have to know that to move it.
+  let built: readonly Floor[] = floors;
+  if (floors.length > 1 && !hasVerticalCirculation(floors)) {
+    const fitted = fitCores(floors, ['stair', 'lift']);
+    if (fitted.placement) {
+      built = fitted.floors;
+      issues.push({
+        severity: 'review',
+        code: 'CORES_ADDED',
+        message: fitted.note,
+        remedy:
+          'Open the 2D plan, select the Staircase or Lift and drag it onto the real core, or delete ' +
+          'it and draw your own.',
+      });
+      for (const check of fitted.checks) {
+        for (const note of check.notes) {
+          issues.push({ severity: 'review', code: 'STAIR_PROPORTION', message: note });
+        }
+      }
+    }
+  }
+
   // Footprint from the largest floor's extent.
-  const allPoints = floors.flatMap((f) => f.rooms.flatMap((r) => r.boundary));
+  const allPoints = built.flatMap((f) => f.rooms.flatMap((r) => r.boundary));
   const footprint = boundingRectangle(allPoints);
 
-  const building: Building = { id: buildingId, siteId, name: spec.name, floors, footprint };
+  const building: Building = { id: buildingId, siteId, name: spec.name, floors: built, footprint };
 
   const width = footprint.length > 0 ? extentOf(footprint, 'x') : 0;
   const depth = footprint.length > 0 ? extentOf(footprint, 'y') : 0;

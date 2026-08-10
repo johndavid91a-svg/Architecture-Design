@@ -31,6 +31,7 @@ import type {
   TextItem,
 } from './contract.js';
 import { SANITY } from './contract.js';
+import { labelRooms } from './room-labels.js';
 
 export interface RecogniseOptions {
   /** A plan carries no heights; this is what rooms and walls get. */
@@ -929,68 +930,6 @@ function direction(from: Point2, to: Point2): Point2 {
 const MITRE_LIMIT = 4;
 
 // ---------------------------------------------------------------------------
-// Room naming
-// ---------------------------------------------------------------------------
-
-const NAME_PATTERNS: ReadonlyArray<readonly [RegExp, RoomUse]> = [
-  [/reception|foyer|entrance|lobby/i, 'reception'],
-  [/conferen|boardroom|meeting/i, 'conference'],
-  [/open.?office|open.?plan|hall/i, 'open_office'],
-  [/office|study|cabin/i, 'office'],
-  [/corridor|passage|circulation/i, 'corridor'],
-  [/stair|steps/i, 'stair'],
-  [/lift|elevator/i, 'lift'],
-  [/toilet|\bwc\b|bath|wash|powder/i, 'toilet'],
-  [/kitchen|pantry/i, 'kitchen'],
-  [/stor(e|age)|closet|utility/i, 'store'],
-  [/bed.?room|\bbed\b|master/i, 'bedroom'],
-  [/living|lounge|drawing|sitting|tv/i, 'living'],
-  [/dining/i, 'dining'],
-  [/shop|retail|showroom/i, 'retail'],
-  [/park/i, 'parking'],
-  [/lab/i, 'laboratory'],
-  [/server|electric|plant|mech/i, 'plant'],
-];
-
-/** Text that is a measurement rather than a name. */
-const DIMENSION_LIKE = /^[\d\s.,'"×xX\-\/]+(mm|cm|m|ft|in|sq\.?\s?ft|sqft|m2|m²)?$/i;
-
-function pointInPolygon(point: Point2, polygon: readonly Point2[]): boolean {
-  let inside = false;
-  const n = polygon.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const pi = polygon[i]!;
-    const pj = polygon[j]!;
-    if (pi.y > point.y !== pj.y > point.y) {
-      const x = ((pj.x - pi.x) * (point.y - pi.y)) / (pj.y - pi.y) + pi.x;
-      if (point.x < x) inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function nameFor(
-  boundary: readonly Point2[],
-  texts: readonly TextItem[],
-  scale: number,
-): { name: string; use: RoomUse } {
-  let best: TextItem | null = null;
-  for (const text of texts) {
-    const at = { x: text.at.x * scale, y: text.at.y * scale };
-    if (!pointInPolygon(at, boundary)) continue;
-    if (DIMENSION_LIKE.test(text.text.trim())) continue;
-    if (best === null || (text.heightHint ?? 0) > (best.heightHint ?? 0)) best = text;
-  }
-
-  if (!best) return { name: 'Room', use: 'other' };
-  const label = best.text.trim();
-  for (const [pattern, use] of NAME_PATTERNS) {
-    if (pattern.test(label)) return { name: label, use };
-  }
-  return { name: label, use: 'other' };
-}
-
-// ---------------------------------------------------------------------------
 // Openings from gaps
 // ---------------------------------------------------------------------------
 
@@ -1312,7 +1251,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
   if (rejected.tooLarge > 0) note('enclosure larger than the maximum room area', rejected.tooLarge);
   if (rejected.runaway > 0) note('face trace abandoned without closing', rejected.runaway);
 
-  const rooms: CandidateRoom[] = [];
+  const boundaries: Array<readonly Point2[]> = [];
   for (const face of faces) {
     const boundary = insetFace(face, medianThickness / 2);
     const area = polygonArea(boundary);
@@ -1327,15 +1266,43 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
       note('face too slender to be a room');
       continue;
     }
+    boundaries.push(boundary);
+  }
 
-    const { name, use } = nameFor(boundary, work.texts, scale);
-    rooms.push({
-      name,
-      use,
+  // Names are assigned to all the spaces at once, not one at a time, because
+  // the assignment is competitive: a label belongs to the space that contains
+  // it, and only a label no space contains is free for a space that has none.
+  const labels = labelRooms(boundaries, work.texts, scale);
+  const rooms: CandidateRoom[] = boundaries.map((boundary, i) => {
+    const label = labels[i]!;
+    return {
+      name: label.name,
+      use: label.use,
       boundary,
       clearHeight: opts.defaultClearHeightMm,
       confidence: 'extracted',
-      note: 'Enclosed by recognised walls; boundary inset by half a wall thickness.',
+      note:
+        label.basis === 'inside'
+          ? `Named "${label.name}" from the text drawn inside it. Boundary inset by half a wall thickness.`
+          : label.basis === 'nearby'
+            ? `Named "${label.name}" from the nearest unclaimed label on the sheet, within 2 m. Check it.`
+            : 'No name was written in this space on the drawing. Boundary inset by half a wall thickness.',
+    };
+  });
+
+  const named = labels.filter((l) => l.basis !== 'none').length;
+  if (rooms.length > 0) {
+    issues.push({
+      severity: 'info',
+      code: 'ROOM_NAMES_READ',
+      message:
+        `${named} of ${rooms.length} space(s) took their name from the text on the sheet ` +
+        `(${labels.filter((l) => l.basis === 'nearby').length} from a label just outside the traced ` +
+        `outline). The rest are shown as "Unnamed space" — the drawing wrote no name inside them.`,
+      remedy:
+        named < rooms.length
+          ? 'Name them in the 2D plan, or import the DXF, where the text sits on its own layer and reads far more reliably.'
+          : undefined,
     });
   }
 

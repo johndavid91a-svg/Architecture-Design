@@ -16,6 +16,8 @@ export * from './model/guard.js';
 export * from './model/edit.js';
 export * from './model/history.js';
 export * from './model/circulation.js';
+export * from './model/core-placement.js';
+export * from './model/wayfinding.js';
 
 export * from './catalogue/materials.js';
 export * from './catalogue/furniture.js';
@@ -55,6 +57,7 @@ export * from './import/recognise.js';
 export * from './import/dxf.js';
 export * from './import/pdf.js';
 export * from './import/sheet.js';
+export * from './import/room-labels.js';
 
 export * from './layout/double-loaded.js';
 export * from './layout/tour.js';
