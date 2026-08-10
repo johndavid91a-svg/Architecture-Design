@@ -276,18 +276,20 @@ export async function extractPdfLineWork(
       // sheets. One number for the whole file cannot be right for such a set.
       let pageScale = resolved.toMmScale;
       let pageUnits = resolved.units;
+      let drawingBox: { x0: number; y0: number; x1: number; y1: number } | undefined;
 
       if (opts.calibration === undefined) {
         const stated = await statedScaleFor(rawBytes, doc, n);
         if (stated) {
           pageScale = stated.toMmScale;
           pageUnits = stated.units;
+          drawingBox = stated.drawingBox;
           measuredPages++;
         }
         issues.push(...stated?.issues ?? []);
       }
 
-      pages.push(await extractPage(pdfjs, doc, n, sheetName, pageScale, pageUnits));
+      pages.push(await extractPage(pdfjs, doc, n, sheetName, pageScale, pageUnits, drawingBox));
     }
   } catch (err) {
     issues.push({
@@ -507,6 +509,20 @@ interface GraphicsState {
   ctm: Matrix;
   strokeColour: string;
   lineWidth: number;
+  /**
+   * Whether the current stroke has a dash pattern set.
+   *
+   * A dashed line is never building fabric. Every drawing convention that uses
+   * one — a grid line, a centre line, a section line, hidden work above, a
+   * dimension chain — is annotation, and a wall is drawn solid. On this
+   * building two dashed grid lines ran the full width of the sheet, straight
+   * across the hall, and each was read as a 40 ft wall: a wall through the
+   * middle of a room is the one thing that guarantees the room never closes.
+   *
+   * The pattern also survives `mergeCollinear`, which would otherwise weld the
+   * dashes of one grid line into a single convincing stroke.
+   */
+  dashed: boolean;
 }
 
 /**
@@ -521,7 +537,13 @@ async function statedScaleFor(
   rawBytes: string,
   doc: PdfjsDocument,
   pageNumber: number,
-): Promise<{ toMmScale: number; units: UnitResolution; issues: ImportIssue[] } | null> {
+): Promise<{
+  toMmScale: number;
+  units: UnitResolution;
+  issues: ImportIssue[];
+  /** The rectangle the scale applies over — the drawing, not the sheet. */
+  drawingBox?: { x0: number; y0: number; x1: number; y1: number };
+} | null> {
   let page: PdfjsPage;
   try {
     page = await doc.getPage(pageNumber);
@@ -569,6 +591,7 @@ async function statedScaleFor(
   }
 
   return {
+    drawingBox: verdict.chosen?.bbox,
     toMmScale: verdict.mmPerPoint,
     units: {
       unit: 'mm',
@@ -603,6 +626,18 @@ async function extractPage(
   sheetName: string,
   toMmScale: number,
   units: UnitResolution,
+  /**
+   * The rectangle the page's measurement viewport covers.
+   *
+   * This is the drawing, and everything outside it is sheet furniture: the
+   * border, the title block, the consultant's address, the copyright notice.
+   * Keeping that geometry cost us twice over — the frame paired into a 62 ft
+   * rectangle of "wall" enclosing the whole building, and the title block's
+   * ruled cells closed as rooms, so an imported floor came back with spaces
+   * named "DHA" and "N.T.S". The file already says where the drawing is; there
+   * is no reason to guess.
+   */
+  drawingBox?: { x0: number; y0: number; x1: number; y1: number },
 ): Promise<PdfLineWork> {
   const page = await doc.getPage(pageNumber);
   const skipped: Record<string, number> = {};
@@ -632,7 +667,7 @@ async function extractPage(
   }
 
   const rawSegments = await walkOperators(pdfjs, page, base, bump, issues, pageNumber);
-  const segments = dedupe(rawSegments);
+  let segments = dedupe(rawSegments);
 
   if (rawSegments.length >= PDF_TUNING.maxSegmentsPerPage) {
     issues.push({
@@ -675,7 +710,7 @@ async function extractPage(
     });
   }
 
-  const texts = await readText(page, base, bump, issues, pageNumber);
+  let texts = await readText(page, base, bump, issues, pageNumber);
 
   if (segments.length === 0) {
     issues.push({
@@ -686,6 +721,43 @@ async function extractPage(
         'This may be a cover sheet, a schedule, or a scanned image. Select a different page, or ' +
         'supply a vector export of the drawing.',
     });
+  }
+
+  // ---- Crop to the drawing --------------------------------------------
+  // Everything outside the measurement viewport is sheet furniture. A segment
+  // is kept when it lies wholly inside the box, so a border line that merely
+  // clips a corner is not retained; text is kept on its insertion point, since
+  // a room label is placed by its anchor.
+  let cropped = 0;
+  let croppedText = 0;
+  if (drawingBox && segments.length > 0) {
+    // The box is INSET, not padded.
+    //
+    // The drawing frame is ruled on the viewport boundary itself, so a box taken
+    // at face value keeps it — and a frame pairs into a rectangle of "wall" 62 ft
+    // on a side that encloses the whole building and swallows the face trace. A
+    // one-per-cent inset drops the frame and costs nothing real: no architect
+    // draws a wall hard against the edge of the drawing area.
+    const inset = Math.max(drawingBox.x1 - drawingBox.x0, drawingBox.y1 - drawingBox.y0) * 0.01;
+    const inside = (p: { x: number; y: number }) =>
+      p.x >= drawingBox.x0 + inset &&
+      p.x <= drawingBox.x1 - inset &&
+      p.y >= drawingBox.y0 + inset &&
+      p.y <= drawingBox.y1 - inset;
+
+    const keptSegments = segments.filter((s) => inside(s.a) && inside(s.b));
+    const keptTexts = texts.filter((t) => inside(t.at));
+    // Only accept the crop if it leaves a drawing behind. A viewport that
+    // covers a corner of the sheet rather than the plan would otherwise throw
+    // the building away and leave the title block.
+    if (keptSegments.length >= 20 && keptSegments.length >= segments.length * 0.2) {
+      cropped = segments.length - keptSegments.length;
+      croppedText = texts.length - keptTexts.length;
+      segments = keptSegments;
+      texts = keptTexts;
+      if (cropped > 0) bump('sheet_furniture_outside_the_drawing', cropped);
+      if (croppedText > 0) bump('title_block_text', croppedText);
+    }
   }
 
   const extent = extentOf(segments, texts);
@@ -773,7 +845,7 @@ async function walkOperators(
 
   const list = await page.getOperatorList({ annotationMode: pdfjs.AnnotationMode.DISABLE });
 
-  let state: GraphicsState = { ctm: base, strokeColour: '#000000', lineWidth: 1 };
+  let state: GraphicsState = { ctm: base, strokeColour: '#000000', lineWidth: 1, dashed: false };
   const stack: GraphicsState[] = [];
   const out: LineSegment[] = [];
 
@@ -821,6 +893,10 @@ async function walkOperators(
     } else if (fn === ops['setLineWidth']) {
       const w = Array.isArray(args) ? args[0] : undefined;
       if (typeof w === 'number' && Number.isFinite(w)) state = { ...state, lineWidth: w };
+    } else if (fn === ops['setDash']) {
+      // `d [] 0` clears the dash; anything else sets one.
+      const pattern = Array.isArray(args) ? args[0] : undefined;
+      state = { ...state, dashed: Array.isArray(pattern) && pattern.some((n) => Number(n) > 0) };
     } else if (fn === ops['setStrokeRGBColor']) {
       // pdfjs normalises every stroke colour space to an RGB hex string.
       const c = Array.isArray(args) ? args[0] : undefined;
@@ -906,7 +982,9 @@ function emitSubpaths(
   issues: ImportIssue[],
   pageNumber: number,
 ): void {
-  const layer = `stroke:${state.strokeColour}/${(state.lineWidth * matrixScale(state.ctm)).toFixed(2)}`;
+  const layer =
+    `stroke:${state.strokeColour}/${(state.lineWidth * matrixScale(state.ctm)).toFixed(2)}` +
+    (state.dashed ? '/dashed' : '');
   const width = state.lineWidth * matrixScale(state.ctm);
 
   // Kept in *path* space; the transform is applied only as points are emitted,

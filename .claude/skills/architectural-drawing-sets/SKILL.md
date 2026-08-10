@@ -211,3 +211,52 @@ Measured against this file, honestly:
 Say this. An import that hands over a storey stack, correct names and the
 architect's own figures, while stating plainly that the traced room areas are
 unusable, is worth far more than one that quietly reports 21 sq ft as a floor.
+
+
+## Getting rid of what is not the building
+
+Measured on the working plans of the real set: **~2,400 segments per sheet, of
+which roughly 30 are walls.** Four rules, in this order, take the wall count from
+about 850 per storey to about 280. None of them is a threshold on length; every
+one keys on something the drawing itself says.
+
+1. **Crop to the measurement viewport.** `/VP` gives a `/BBox` alongside the
+   `/Measure` factor, and that box *is* the drawing — everything outside it is
+   the frame, the title block and the consultant's address. **Inset the box by
+   about 1%, do not pad it**: the frame is ruled on the viewport boundary, and
+   kept, it pairs into a 62 ft rectangle of "wall" enclosing the whole building.
+   Cropping also stops title-block cells closing as rooms — an imported floor
+   came back with spaces named `DHA` and `N.T.S`.
+2. **Drop hatch families** (see above).
+3. **Drop line work off the plan's own axes.** Find the dominant direction by
+   *length-weighted* histogram folded into [0°, 90°); if ≥70% of length lies
+   within a few degrees of one direction and its perpendicular, the plan is
+   orthogonal, and anything else is poché, a section arrow, a break line or a
+   leader. This is what catches the hatch *inside* walls, which the family rule
+   cannot: a 9-inch wall filled with diagonals has a length-to-pitch ratio of
+   about three, where an area fill has sixty.
+4. **Drop unpaired lines with a measurement written along them.** A wall does not
+   have `25'-2"` printed on it. Apply to unpaired lines only, so a recognised
+   pair can never be deleted.
+
+### The ordering trap
+
+**Run the hatch rule before the axis rule.** The axes are elected by line length,
+and an area fill carries more line length than the building under it — so on raw
+line work the vote elects the hatch's own 45° as the plan's axis and throws away
+every wall. Getting this backwards turned a passing fixture into `floor: null`.
+Order is the whole safeguard, and it deserves a test of its own.
+
+### What still does not work
+
+Even with all four, the face tracer does not close the rooms of a dense
+commercial plan. On the set measured here the storeys come out at 0–70% of their
+stated covered area. The remaining causes are ordinary drawing conventions that
+survive every rule above — grid and centre lines drawn as separate dashes rather
+than with a PDF dash pattern (so `mergeCollinear` welds them into convincing
+40 ft "walls" straight across a hall), and corners where paired centrelines stop
+short of meeting.
+
+**So do not promise room areas from a PDF.** Promise the storey stack, the storey
+names, the wall run, and the drawing's own stated areas — and let the
+covered-area cross-check refuse the rest out loud.

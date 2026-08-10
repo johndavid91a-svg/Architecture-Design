@@ -102,6 +102,8 @@ interface Seg {
   angle: number;
   layer?: string;
   used: boolean;
+  /** Set when a measurement is written along this line — see `markDimensionLines`. */
+  isDimension?: boolean;
 }
 
 function makeSeg(a: Point2, b: Point2, layer?: string): Seg | null {
@@ -200,6 +202,126 @@ function mergeCollinear(segments: Seg[], toleranceMm: number, parallelDeg: numbe
 }
 
 // ---------------------------------------------------------------------------
+// Dimension lines
+// ---------------------------------------------------------------------------
+
+/** Text that states a measurement rather than naming anything. */
+const MEASUREMENT = /^[\d\s.,'"\u2032\u2033\u00d7xX*\-\/]+(mm|cm|m|ft|in|sq\.?\s?ft|sqft|m2|m\u00b2)?$/i;
+
+/** How close a measurement must sit to a line to be its label, in millimetres. */
+const DIMENSION_TEXT_REACH_MM = 500;
+
+/**
+ * Mark the lines that have a measurement written along them.
+ *
+ * A dimension line is a single stroke with its value printed on it, and on a
+ * working plan there are dozens — including, on this building, two that ran the
+ * full width of the hall. Unpaired, they became 40 ft "walls" lying across the
+ * middle of the room, and a wall through the middle of a room is precisely what
+ * stops the room from ever closing.
+ *
+ * The signal is the drawing's own annotation rather than a threshold: a wall
+ * does not have `25'-2"` written along its length. Only the perpendicular
+ * distance is tested, plus that the text falls within the line's own span, so a
+ * dimension chain running parallel to a wall a few feet away does not condemn
+ * the wall.
+ */
+function markDimensionLines(
+  segments: Seg[],
+  texts: readonly TextItem[],
+  scale: number,
+): number {
+  const labels = texts
+    .filter((t) => MEASUREMENT.test(t.text.trim()) && /\d/.test(t.text))
+    .map((t) => ({ x: t.at.x * scale, y: t.at.y * scale }));
+  if (labels.length === 0) return 0;
+
+  let marked = 0;
+  for (const s of segments) {
+    for (const label of labels) {
+      // Distance along the line, and perpendicular distance from it.
+      const along = (label.x - s.a.x) * s.ux + (label.y - s.a.y) * s.uy;
+      if (along < 0 || along > s.length) continue;
+      const across = Math.abs(-(label.x - s.a.x) * s.uy + (label.y - s.a.y) * s.ux);
+      if (across > DIMENSION_TEXT_REACH_MM) continue;
+      s.isDimension = true;
+      marked++;
+      break;
+    }
+  }
+  return marked;
+}
+
+// ---------------------------------------------------------------------------
+// The drawing's own axes
+// ---------------------------------------------------------------------------
+
+/** Share of line length that must lie on two perpendicular axes to call a plan orthogonal. */
+const ORTHOGONAL_SHARE = 0.7;
+/** How far off an axis a line may sit and still count as on it. */
+const AXIS_TOLERANCE_DEG = 4;
+
+/**
+ * Find the axes a plan is drawn on, if it has any.
+ *
+ * Almost every building is set out on two perpendicular axes, and almost every
+ * drawing convention that is *not* building fabric is drawn at 45° to them:
+ * poché inside a wall, hatch over an area, section arrows, break lines, leaders.
+ *
+ * That gives a discriminator no threshold can match. Wall poché defeats the
+ * hatch-family rule because its lines are short relative to their pitch — a
+ * 9-inch wall filled with diagonals gives a length-to-gap ratio of about three,
+ * where a genuine area fill gives sixty. But it is still at 45°, and the walls
+ * containing it are not.
+ *
+ * Returned only when the plan really is orthogonal. A building set out on a
+ * diagonal, or a curved one, gets nothing and is read exactly as before.
+ */
+function dominantAxis(segments: readonly Seg[]): number | null {
+  if (segments.length === 0) return null;
+
+  // Weight by length, so a thousand hatch ticks cannot outvote the walls.
+  const bins = new Array<number>(90).fill(0);
+  let total = 0;
+  for (const s of segments) {
+    // Fold to [0, 90): a plan's two axes are 90° apart, so they share a bin.
+    const folded = Math.floor(s.angle % 90);
+    bins[Math.min(89, Math.max(0, folded))]! += s.length;
+    total += s.length;
+  }
+  if (total <= 0) return null;
+
+  let best = 0;
+  let bestWeight = -1;
+  for (let a = 0; a < 90; a++) {
+    // The bins within tolerance of this angle, wrapping at 90.
+    let weight = 0;
+    for (let d = -AXIS_TOLERANCE_DEG; d <= AXIS_TOLERANCE_DEG; d++) {
+      weight += bins[(a + d + 90) % 90]!;
+    }
+    if (weight > bestWeight) {
+      bestWeight = weight;
+      best = a;
+    }
+  }
+
+  return bestWeight / total >= ORTHOGONAL_SHARE ? best : null;
+}
+
+/**
+ * Is this line on one of the plan's two axes?
+ *
+ * Angles are folded into [0, 90) because the two axes are 90° apart and share a
+ * bin, and the comparison wraps at 90 so that a line at 89° is one degree from
+ * an axis at 0°, not eighty-nine.
+ */
+function onAxis(segment: Seg, axis: number): boolean {
+  const folded = ((segment.angle % 90) + 90) % 90;
+  const raw = Math.abs(folded - axis);
+  return Math.min(raw, 90 - raw) <= AXIS_TOLERANCE_DEG;
+}
+
+// ---------------------------------------------------------------------------
 // Hatching
 // ---------------------------------------------------------------------------
 
@@ -222,8 +344,17 @@ const HATCH_MIN_FAMILY = 6;
  * sides, so no plausible arrangement of real walls can be mistaken for a fill.
  */
 const HATCH_MIN_LENGTH_TO_GAP = 8;
-/** Gaps outside this band are not a hatch pitch. */
-const HATCH_MIN_GAP_MM = 40;
+/**
+ * Gaps outside this band are not a hatch pitch.
+ *
+ * The floor is 15 mm rather than something comfortable, because the poché
+ * *inside* a wall is the finest hatch on the sheet: a 9-inch brick wall filled
+ * with diagonals at a two-point pitch is about 24 mm of building between lines.
+ * Set higher, the rule catches the big area-block fill and leaves every wall on
+ * the plan packed with short diagonals that pair into walls of their own — which
+ * is what stopped the external wall of this building ever closing a room.
+ */
+const HATCH_MIN_GAP_MM = 15;
 const HATCH_MAX_GAP_MM = 5000;
 /** How much the pitch may wander across a family and still be regular. */
 const HATCH_GAP_TOLERANCE = 0.3;
@@ -365,6 +496,11 @@ const NOT_WALL_LAYER = new RegExp(
     // Annotation and presentation
     'dimens|dims|acot|text|note|anno|label|title|sheet|legend|logo|north|scale',
     'grid|axis|hatch|texture|pattern|defpoint|viewport|image|raster|projection',
+    // A dashed stroke, which a PDF import tags on the synthetic layer it builds
+    // per stroke style. Nothing drawn dashed is building fabric: grid lines,
+    // centre lines, section lines, hidden work above and dimension chains are
+    // all dashed, and a wall is drawn solid.
+    'dashed',
   ].join('|'),
   'i',
 );
@@ -1287,19 +1423,36 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
         'spaced parallel partitions that this rule caught.',
     });
   }
-  if (namesItsWalls && byRole.unknown > 0) {
-    note('line work on layers not named as walls', byRole.unknown);
-    issues.push({
-      severity: 'info',
-      code: 'WALL_LAYERS_USED',
-      message:
-        `The drawing names its wall layers, so only the ${byRole.wall} line(s) on them were read ` +
-        `as walls; ${byRole.unknown} line(s) on other layers were left out.`,
-      remedy: 'If walls are missing from the model, they are probably drawn on a differently named layer.',
-    });
+
+  // ---- Off-axis line work ------------------------------------------------
+  // Deliberately AFTER the hatch families are gone.
+  //
+  // The axes are found by weighting each direction by the line length on it, and
+  // an area fill carries more line length than the building it covers — so run
+  // on the raw drawing it elects the hatch's own 45° as the plan's axis and
+  // throws away every wall. Ordering is the whole safeguard.
+  const axis = dominantAxis(hatch.kept);
+  let fabricLines = hatch.kept;
+  if (axis !== null) {
+    fabricLines = hatch.kept.filter((s) => onAxis(s, axis));
+    const off = hatch.kept.length - fabricLines.length;
+    if (off > 0) {
+      note('line work at an angle to the plan’s own axes', off);
+      issues.push({
+        severity: 'info',
+        code: 'OFF_AXIS_REMOVED',
+        message:
+          `This plan is set out on two perpendicular axes, and ${off} line(s) run at an angle to ` +
+          `them. Those are poché inside walls, hatch over areas, section arrows and leaders — the ` +
+          `conventions a drawing uses that are not building fabric — so they were left out.`,
+        remedy:
+          'If this building genuinely has walls on a diagonal, they will be missing from the model; ' +
+          'draw them in the plan editor or import the DXF instead.',
+      });
+    }
   }
 
-  if (fabric.length === 0) {
+  if (fabricLines.length === 0) {
     return {
       floor: null,
       issues: [
@@ -1308,8 +1461,9 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
           severity: 'blocking',
           code: 'NO_FABRIC_LINES',
           message:
-            `All ${segments.length} line(s) in the drawing sit on layers that hold something other ` +
-            `than building fabric, so there is nothing to read as a wall.`,
+            `All ${segments.length} line(s) in the drawing were set aside as something other than ` +
+            `building fabric — a layer that says so, a hatch fill, or line work at an angle to the ` +
+            `plan's own axes — so there is nothing to read as a wall.`,
           remedy: 'Check that the floor plan layers are turned on in the exported file.',
         },
       ],
@@ -1318,10 +1472,34 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
   }
 
   // ---- Walls -----------------------------------------------------------
-  const { walls: paired, unpaired } = pairWalls(hatch.kept, opts);
+  const { walls: paired, unpaired } = pairWalls(fabricLines, opts);
+
+  // A line with a measurement written along it is a dimension line, not a wall.
+  //
+  // A working plan is criss-crossed with dimension chains, and on this building
+  // two of them ran the full width of the hall. A dimension line is a single
+  // unpaired stroke, so it became a "wall" 40 ft long lying across the middle of
+  // the room — and a wall through the middle of a room is the one thing that
+  // guarantees the room never closes. The test is only applied to unpaired
+  // lines, so it can never delete a wall that was recognised as a pair, and it
+  // keys on the drawing's own annotation rather than on any threshold.
+  const dimensioned = markDimensionLines(unpaired, work.texts, scale);
+  if (dimensioned > 0) {
+    note('dimension lines carrying a measurement', dimensioned);
+    issues.push({
+      severity: 'info',
+      code: 'DIMENSION_LINES_REMOVED',
+      message:
+        `${dimensioned} line(s) had a dimension written along them and were read as dimension ` +
+        `lines rather than walls.`,
+    });
+  }
 
   const singles: WallRun[] = [];
   for (const s of unpaired) {
+    if (s.isDimension) {
+      continue;
+    }
     if (s.length < opts.minSingleLineWallMm) {
       note('unpaired short line (annotation or noise)');
       continue;
@@ -1351,7 +1529,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
         {
           severity: 'blocking',
           code: 'NO_WALLS',
-          message: `None of the ${hatch.kept.length} lines of building fabric could be read as a wall.`,
+          message: `None of the ${fabricLines.length} lines of building fabric could be read as a wall.`,
           remedy:
             'The drawing may be at the wrong scale, or drawn in a style the recogniser does not handle. Check the calibration first.',
         },
@@ -1481,7 +1659,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
     loadBearing: wall.thickness >= 200,
     confidence: wall.confidence,
     note: wall.note,
-    openings: findOpenings(wall, hatch.kept, work.arcs, scale, opts),
+    openings: findOpenings(wall, fabricLines, work.arcs, scale, opts),
   }));
 
   const openingCount = candidateWalls.reduce((n, w) => n + w.openings.length, 0);

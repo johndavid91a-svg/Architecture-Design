@@ -56,6 +56,7 @@ export * from './import/ifc.js';
 export * from './import/recognise.js';
 export * from './import/dxf.js';
 export * from './import/pdf.js';
+export * from './import/pdf-measure.js';
 export * from './import/sheet.js';
 export * from './import/room-labels.js';
 export * from './import/area-schedule.js';
