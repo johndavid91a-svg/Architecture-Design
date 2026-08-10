@@ -28,6 +28,7 @@
 import { distance, distancePointToSegment } from '../geometry.js';
 import type { Point2 } from '../model/architecture.js';
 import type { Millimetres } from '../units.js';
+import { readPageMeasures, verdictFromMeasures } from './pdf-measure.js';
 import { parseLength, toMm } from '../units.js';
 import {
   SANITY,
@@ -206,19 +207,37 @@ export async function extractPdfLineWork(
 
   // --- Scale ---------------------------------------------------------------
   const resolved = resolveScale(opts.calibration);
-  issues.push(...resolved.issues);
+  // Held back until the pages have been read. If the file states its own
+  // plotting scale, the "nothing was calibrated" refusal is no longer true and
+  // must not be reported as though it were.
+  const uncalibratedIssues = resolved.issues;
+
+  /**
+   * The original bytes, as latin1, captured before pdfjs sees them.
+   *
+   * Two reasons this happens here rather than per page. pdfjs takes ownership
+   * of the array handed to `getDocument` and detaches its buffer, so reading
+   * `data` afterwards yields nothing — which is why the viewport parser found
+   * the file empty when it was called later. And re-encoding a 28 MB drawing
+   * set once per page is 56 passes over the whole file for information that
+   * never changes. latin1 keeps one byte to one character, so string offsets
+   * stay byte offsets and the binary streams between objects survive intact.
+   */
+  const rawBytes = Buffer.from(data).toString('latin1');
 
   // --- Document ------------------------------------------------------------
   let doc: PdfjsDocument;
+  let task: PdfjsLoadingTask;
   try {
-    doc = await pdfjs.getDocument({
+    task = pdfjs.getDocument({
       data,
       useSystemFonts: false,
       isEvalSupported: false,
       // Errors only. pdfjs is chatty about missing standard-font data, which is
       // expected here: this module has no filesystem access by design.
       verbosity: 0,
-    }).promise;
+    });
+    doc = await task.promise;
   } catch (err) {
     return {
       pages: [],
@@ -245,11 +264,30 @@ export async function extractPdfLineWork(
   }
 
   const pages: PdfLineWork[] = [];
+  let measuredPages = 0;
   try {
     for (let n = 1; n <= doc.numPages; n++) {
       const label = labels?.[n - 1];
       const sheetName = typeof label === 'string' && label.trim() !== '' ? label.trim() : `Page ${n}`;
-      pages.push(await extractPage(pdfjs, doc, n, sheetName, resolved.toMmScale, resolved.units));
+
+      // Scale is resolved per page, not per document. A drawing set routinely
+      // holds a ground-floor plan and a site plan at different scales, and the
+      // set measured while building this held 59 distinct factors across 56
+      // sheets. One number for the whole file cannot be right for such a set.
+      let pageScale = resolved.toMmScale;
+      let pageUnits = resolved.units;
+
+      if (opts.calibration === undefined) {
+        const stated = await statedScaleFor(rawBytes, doc, n);
+        if (stated) {
+          pageScale = stated.toMmScale;
+          pageUnits = stated.units;
+          measuredPages++;
+        }
+        issues.push(...stated?.issues ?? []);
+      }
+
+      pages.push(await extractPage(pdfjs, doc, n, sheetName, pageScale, pageUnits));
     }
   } catch (err) {
     issues.push({
@@ -259,7 +297,36 @@ export async function extractPdfLineWork(
       remedy: 'Re-export the PDF from the authoring tool and try again.',
     });
   } finally {
-    await doc.destroy().catch(() => undefined);
+    // Releasing the document must never be able to change the outcome. This
+    // runs in a `finally`, so anything thrown here replaces the real result —
+    // which is exactly how a wrong method name turned every successful import
+    // into a TypeError. Freeing memory is not worth a page of extracted
+    // geometry, so the whole thing is swallowed, synchronously included.
+    try {
+      await task.destroy();
+    } catch {
+      /* Already finished, or an older build with a different shape. */
+    }
+  }
+
+  // ---- What the scale ended up being --------------------------------------
+  if (measuredPages > 0) {
+    // The file answered the question itself. That is much better evidence than
+    // a guess and still not a measurement — the factor is a claim, and the unit
+    // it is expressed in is usually left blank — so this drops from blocking to
+    // review rather than to silence.
+    issues.push({
+      severity: 'review',
+      code: 'PDF_SCALE_FROM_FILE',
+      message:
+        `${measuredPages} of ${pages.length} page(s) state their own plotting scale, which was used ` +
+        `instead of refusing to measure. Each page is scaled by its own factor.`,
+      remedy:
+        'Check one known dimension against the imported model before relying on any quantity. If it ' +
+        'disagrees, calibrate the sheet by hand instead.',
+    });
+  } else {
+    issues.push(...uncalibratedIssues);
   }
 
   if (pages.length > 0 && pages.every((p) => p.segments.length === 0)) {
@@ -440,6 +507,93 @@ interface GraphicsState {
   ctm: Matrix;
   strokeColour: string;
   lineWidth: number;
+}
+
+/**
+ * The scale a page states about itself, if it states one.
+ *
+ * Returns `null` when the page records nothing, which leaves the uncalibrated
+ * blocking behaviour exactly as it was. A file that says nothing about its scale
+ * still gets refused rather than guessed at — this only reads a claim the file
+ * actually makes.
+ */
+async function statedScaleFor(
+  rawBytes: string,
+  doc: PdfjsDocument,
+  pageNumber: number,
+): Promise<{ toMmScale: number; units: UnitResolution; issues: ImportIssue[] } | null> {
+  let page: PdfjsPage;
+  try {
+    page = await doc.getPage(pageNumber);
+  } catch {
+    return null;
+  }
+
+  const objectNumber = page.ref?.num;
+  if (typeof objectNumber !== 'number') return null;
+
+  const view = page.view;
+  const mediaBox = {
+    widthPt: Math.abs((view[2] ?? 0) - (view[0] ?? 0)),
+    heightPt: Math.abs((view[3] ?? 0) - (view[1] ?? 0)),
+  };
+
+  const verdict = verdictFromMeasures(readPageMeasures(rawBytes, pageNumber, objectNumber), mediaBox);
+  if (verdict.mmPerPoint === null) {
+    return verdict.issues.length > 0
+      ? { toMmScale: 0, units: unmeasuredUnits(), issues: [...verdict.issues] }
+      : null;
+  }
+
+  // A last sanity check on the file's own claim. The sheet is about half a
+  // metre across, so a plausible drawing scale puts the building somewhere
+  // between a shed and a campus; anything outside that is a misread factor or a
+  // unit that is not inches, and measuring from it would be worse than refusing.
+  const spanMm = Math.max(mediaBox.widthPt, mediaBox.heightPt) * verdict.mmPerPoint;
+  if (spanMm < 2_000 || spanMm > 2_000_000) {
+    return {
+      toMmScale: 0,
+      units: unmeasuredUnits(),
+      issues: [
+        ...verdict.issues,
+        {
+          severity: 'review',
+          code: 'PDF_MEASURE_IMPLAUSIBLE',
+          message:
+            `Page ${pageNumber} states a scale that would make the sheet ` +
+            `${(spanMm / 1000).toFixed(1)} m across. That is not a drawing scale, so it was ignored.`,
+          remedy: 'Calibrate this sheet against a known dimension instead.',
+        },
+      ],
+    };
+  }
+
+  return {
+    toMmScale: verdict.mmPerPoint,
+    units: {
+      unit: 'mm',
+      source: 'file_header',
+      // Never confident. The factor is the file's own claim, and a claim can be
+      // wrong — the unit is usually left blank, and a sheet re-plotted by a tool
+      // that rewrote the geometry without the factor would be consistent and
+      // wrong. It is far better evidence than a guess and still not a
+      // measurement, so the review issue downstream stays.
+      confident: false,
+      note:
+        `The page states its own plotting scale: 1:${(verdict.mmPerPoint / 25.4 * 72).toFixed(1)} ` +
+        `(${verdict.mmPerPoint.toFixed(4)} mm per point), read from its PDF measurement viewport.`,
+    },
+    issues: [...verdict.issues],
+  };
+}
+
+function unmeasuredUnits(): UnitResolution {
+  return {
+    unit: 'mm',
+    source: 'unknown',
+    confident: false,
+    note: 'The page states no usable scale, so no millimetre dimension may be derived from it.',
+  };
 }
 
 async function extractPage(
@@ -1248,18 +1402,34 @@ function perpendicularDistanceToLine(p: Point2, a: Point2, b: Point2): number {
 interface PdfjsModule {
   readonly OPS: Readonly<Record<string, number>>;
   readonly AnnotationMode: { readonly DISABLE: number };
-  getDocument(src: unknown): { readonly promise: Promise<PdfjsDocument> };
+  getDocument(src: unknown): PdfjsLoadingTask;
+}
+
+/**
+ * The handle returned by `getDocument`.
+ *
+ * `destroy` lives here, on the loading task — *not* on the document proxy. This
+ * interface previously declared it on the document, which is an API that does
+ * not exist: the call threw, and because it ran in a `finally` it replaced
+ * whatever the extraction had produced with a TypeError. PDF import could not
+ * succeed on any platform. Hand-written declarations for an untyped module are
+ * assertions the compiler cannot check, so they have to match the real thing.
+ */
+interface PdfjsLoadingTask {
+  readonly promise: Promise<PdfjsDocument>;
+  destroy(): Promise<void>;
 }
 
 interface PdfjsDocument {
   readonly numPages: number;
   getPage(pageNumber: number): Promise<PdfjsPage>;
   getPageLabels(): Promise<(string | null)[] | null>;
-  destroy(): Promise<void>;
 }
 
 interface PdfjsPage {
   readonly view: number[];
+  /** The page's PDF object number, used to find its dictionary in the raw bytes. */
+  readonly ref?: { num: number; gen: number };
   readonly rotate: number;
   getOperatorList(params?: unknown): Promise<{ fnArray: number[]; argsArray: unknown[] }>;
   getTextContent(params?: unknown): Promise<{ items: unknown[] }>;

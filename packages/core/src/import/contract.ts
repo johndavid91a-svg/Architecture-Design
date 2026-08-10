@@ -283,7 +283,17 @@ export interface LineWork {
  *   was scaled on export or print, which is common.
  */
 export interface ScaleCalibration {
-  readonly method: 'known_distance' | 'dimension_text' | 'stated_scale';
+  /**
+   * `pdf_measure_viewport` — the scale the PDF states about itself.
+   *
+   * A CAD-plotted PDF often carries `/VP` viewport dictionaries, each with a
+   * `/Measure` giving the number of real-world units per page point over a
+   * named rectangle. That is the plotting scale recorded by the tool that made
+   * the file, not an inference from its appearance, which makes it by a wide
+   * margin the best evidence available — and it survives the one thing that
+   * defeats a "1:100" note, namely being re-plotted to a different sheet size.
+   */
+  readonly method: 'pdf_measure_viewport' | 'known_distance' | 'dimension_text' | 'stated_scale';
   /** Distance in page units between the two calibration points. */
   readonly pageDistance: number;
   /** What that distance is in millimetres in the real building. */

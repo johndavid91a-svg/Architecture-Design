@@ -12,7 +12,7 @@ it says so.
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit and integration tests | `npm test` | **143 passed**, 15 files, 0 failed |
+| Unit and integration tests | `npm test` | **149 passed**, 16 files, 0 failed |
 | Core type check | `npm run typecheck --workspace @adp/core` | Clean |
 | Desktop type check | `npm run typecheck --workspace @adp/desktop` | Clean |
 | Desktop build | `npm run build --workspace @adp/desktop` | Clean — main, preload, renderer (1,474 kB) |
@@ -117,7 +117,45 @@ one on the paper, and nothing downstream can detect it.
 
 ---
 
-## 4a. The worked Space Centre design
+## 4a. A real 56-sheet PDF drawing set
+
+A user's own architectural PDF — a DHA residential project, 56 A2 sheets, vector,
+28 MB — imported through the real main-process path.
+
+| | |
+|---|---|
+| Pages read | **56 of 56**, 6.4 s |
+| Richest sheet | 16,757 segments |
+| Sheets with a usable scale | 52 |
+| Blocking issues | **0** |
+
+**The file states its own scale, and this now reads it.** Every page carries a
+PDF `/VP` measurement viewport recording what the plotter wrote down. The scales
+are all different — 1:25.8, 1:31.0, 1:39.4, 1:117.5 — and none is a standard
+architectural ratio, because the sheets were plotted fit-to-page. Any heuristic
+that snapped to 1:50 or assumed one scale per document would have produced a
+building wrong by between 5% and 70%.
+
+Two traps in that data, both silent, both handled:
+
+- **The sheet-wide viewport.** Every page also carries a viewport covering the
+  whole sheet whose factor describes the title-block border — 1:56.6 where the
+  drawing is 1:34. Using it would be a 66% error. It is discarded by area.
+- **Sheets with two scales.** Pages 4, 39 and 47 each carry two drawings at
+  different scales (page 4: a 1:117.5 key plan beside the 1:31.0 main drawing).
+  One number cannot describe such a sheet, so those pages are refused with the
+  reason rather than measured at whichever scale happened to be first.
+
+**What is trustworthy and what is not.** The scale and the overall dimensions
+are right — the longest recognised walls come out at 64 ft and 50 ft, which are
+the building's real dimensions. The rooms are not: the median recognised "wall"
+is 0.6 ft, because a sheet's hatching, furniture and text outlines are all vector
+line work and, unlike a DXF, a PDF carries no layers to tell them apart. Room
+areas from a dense PDF sheet should not be relied on; see `FINAL_VALIDATION.md` §4.
+
+---
+
+## 4b. The worked Space Centre design
 
 `node tools/space-centre-check.mjs`. A four-storey public science centre, built by
 the template and checked as a building rather than as data.
@@ -258,6 +296,9 @@ Every one was found by running the code against real files, not by reading it.
 | 10 | **A drawing at the wrong scale was measured rather than refused.** | `floorplan.dxf` produced zero rooms with no explanation. | Plausibility check on the drawing extent, refusing below 3 m across with the reason and the remedy. |
 | 11 | **"No rooms found" gave no reason.** | Ceco and floorplan both reported it, for completely different causes. | The face walk now reports why faces were rejected, and `NO_ROOMS` names the cause and gives the matching remedy. |
 | 12 | **A file with no extension had its whole path quoted back as its file type.** `/etc/hostname` reported `Unsupported file type "./etc/hostname"`. | Error-handling checks in the main-process harness. | Take the extension from the file name, and say plainly when there is none. |
+| 20 | **PDF import could not succeed on any platform.** `extractPdfLineWork` called `destroy()` on the pdf.js document proxy, where pdf.js does not define it — it lives on the loading task. The call threw from a `finally`, so every successful extraction was replaced by a TypeError. No test touched the module, which is why a completely dead feature looked healthy. | Found by running a user's real 56-sheet drawing set through the extractor. | Hold the loading task and destroy that; make the cleanup incapable of throwing out of `finally`. Added `pdf.test.ts` — 6 tests over a PDF built inside the test — and confirmed it fails 4 ways against the old code. |
+| 19 | **The packaged app could never open a PDF.** electron-vite's `externalizeDepsPlugin` was configured such that nothing was externalised, so pdf.js was bundled into `out/main/pdf-<hash>.js`, and the bundled copy kept pdf.js's own relative `import('./pdf.worker.mjs')` — a file Rollup never emits. The user hit "Setting up fake worker failed: Cannot find module …\out\main\pdf.worker.mjs" on Windows. | Reported from a Windows build, then reproduced exactly on Linux. | Externalise `pdfjs-dist`, `web-ifc` and `dxf-parser` from the main bundle so they resolve from `node_modules` at runtime, where each engine's files sit together. Verified by running the real PDF, an IFC and a DXF *inside the packaged app*. |
+| 18 | **The viewport scale factor was read from the wrong key.** A PDF `/Measure` holds `/A`, `/D` and `/X`; only `/X` carries the drawing scale, and `/A` comes first with a value of 1. Taking the first `/C` returned 1 on every page — not a parse failure but a plausible-looking wrong answer. | Found by dumping the raw dictionary after the parser reported a suspiciously round factor. | Read `/C` from inside the `/X` array specifically. |
 | 17 | **Planning limits were lost on every tab change.** They lived in the Regulation screen's own `useState`, so anything entered evaporated the moment the user looked at anything else, and never reached a saved file. This — not the checker — is why the regulatory feature was inert: nobody enters a bye-law schedule twice. | Found by asking why the feature stays unusable even for someone holding the bye-laws. | Planning parameters moved onto the `Project`, so they save, reload, and appear in the report beside the observations they produced. Saving now requires naming the bye-law they came from, on the same principle the price book runs on. |
 | 14 | **The 3D presentation animations ran at a speed that depended on frame rate.** The cinematic clock accumulated the per-frame `dt`, which is deliberately clamped at 0.05 s so a stalled frame cannot teleport a walker through a wall. Right for movement, wrong for a timed animation: on a machine rendering at 10 fps a 3-second sequence took three times as long and never appeared to finish. | The assemble animation failed to settle within its own duration during the end-to-end run. | Read the wall clock directly instead of accumulating clamped steps. |
 | 15 | **Stair and lift cores were placed outside the building.** They were positioned past the far corner of the widest floor at y = 0, which reads as an annex hanging off the corner rather than a core. | Visible in the 3D capture of the Space Centre. | Place the core on the circulation spine, centred on the corridor and abutting its end wall — where a real core goes, and where the corridor's escape door already leads. |

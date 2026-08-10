@@ -207,10 +207,16 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
     }
 
     // A page is in points and says nothing about building scale, so nothing can
-    // be measured until the user calibrates. Reporting that plainly is the whole
+    // be measured until a scale is known. Reporting that plainly is the whole
     // point: a guessed scale produces a plausible building of the wrong size.
-    const uncalibrated = pages.every((page) => !page.units.confident);
-    if (uncalibrated) {
+    //
+    // The test is whether a scale exists, not whether it is *confident*. A page
+    // that states its own plotting scale gives `toMmScale > 0` with
+    // `confident: false` — good evidence the user should still check, which is
+    // a different thing from no evidence at all. Keying on `confident` would
+    // reject every self-measuring drawing set as though it had said nothing.
+    const usable = pages.filter((page) => page.toMmScale > 0);
+    if (usable.length === 0) {
       return {
         ok: false,
         format: 'pdf',
@@ -239,7 +245,12 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
     const allIssues: ImportIssue[] = [...issues];
     let stats: ImportStats | null = null;
 
-    pages.forEach((page, index) => {
+    // Only the pages that have a scale. A title sheet, a 3D view or a sheet
+    // carrying two different scales has `toMmScale: 0`, and running the
+    // recogniser over it would either produce nothing or — worse — produce
+    // geometry at a scale of zero. Those pages already carry their own issue
+    // explaining why they were left out.
+    usable.forEach((page, index) => {
       const recognised = core.recogniseFloor(page, {
         floorName: page.sheetName ?? `Page ${index + 1}`,
         level: index,
@@ -248,6 +259,18 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
       allIssues.push(...recognised.issues);
       stats = recognised.stats;
     });
+
+    if (usable.length < pages.length) {
+      allIssues.push({
+        severity: 'review',
+        code: 'PDF_PAGES_WITHOUT_SCALE',
+        message:
+          `${pages.length - usable.length} of ${pages.length} page(s) had no single usable scale and ` +
+          `were left out — typically the title sheet, a 3D view, or a sheet carrying two drawings at ` +
+          `different scales.`,
+        remedy: 'Import those sheets separately, or calibrate them by hand.',
+      });
+    }
 
     return {
       ok: floors.length > 0,

@@ -66,7 +66,8 @@ Node 20 or later. Tested on Node 22.22.2, Linux.
 - [x] A drawing at an implausible scale is refused with a reason and a remedy
 - [x] A model with no rooms says so rather than inventing them
 - [x] Corrupt, missing and unsupported files produce messages, not crashes
-- [ ] **PDF import end to end** — blocked on the calibration UI, see §4
+- [x] **PDF import end to end** — reads a real 56-sheet set and takes each sheet's own plotting scale from the file
+- [ ] Room recognition quality on dense PDF sheets — see §4
 
 ### Navigation
 
@@ -127,7 +128,8 @@ because of what they would have cost:
 
 | Limitation | Effect | What would close it |
 |---|---|---|
-| **PDF calibration UI not built** | A vector PDF is read and reports that it needs a scale, but there is no two-point pick to give it one. IFC and DXF work end to end. | A calibration overlay in `ImportPanel`: pick two points, type the real distance. The `ScaleCalibration` contract and the `known_distance` path already exist in `packages/core/src/import/contract.ts`. |
+| **Rooms recognised from a dense PDF sheet are unreliable** | A real 56-sheet set imports with the correct scale and correct overall dimensions — the longest walls come out 64 ft and 50 ft, which are the building's real dimensions — but the median recognised "wall" is 0.6 ft, and the rooms come out at 11-55 sq ft. The sheet's hatching, furniture and text outlines are all vector line work and the recogniser cannot tell them from walls. Wall runs and sheet extents are trustworthy; room areas from PDF are not. | A DXF carries layers, which is exactly how this was solved there (`classifyLayer`). A PDF has none, so the equivalent would have to be inferred from stroke width, colour and length distribution. Until then, prefer DXF or IFC when room areas matter. |
+| **PDF calibration UI not built** | A sheet that does *not* state its own scale still reports that it needs one, and there is no two-point pick to give it. Sheets that state their scale no longer need it. | A calibration overlay in `ImportPanel`: pick two points, type the real distance. The `ScaleCalibration` contract and the `known_distance` path already exist in `packages/core/src/import/contract.ts`. |
 | **Some DXF site plans do not close into rooms** | `Ceco.NET-Architecture-Tm-53.dxf` gives 87 walls and 1 room. Wall quantities are available; floor quantities are not. | Curved-wall support, and treating `wall low` / `wall high` as distinct classes rather than both as fabric. |
 | **`schependomlaan.ifc` gives 6 rooms of ~100** | Its spaces use boundary representations the geometry reader does not fully evaluate. Walls import correctly. | Evaluate `IfcRelSpaceBoundary` as a fallback when the space has no usable solid. |
 | **DXF room naming is weak** | Rooms come out called "Room" when names sit outside their boundary or on a filtered layer. | Nearest-name matching with a distance limit, and reading names from an explicitly named layer. |
