@@ -105,3 +105,64 @@ describe('regulation checker', () => {
     expect(report.disclaimer).toMatch(/verified by a qualified architect or engineer/i);
   });
 });
+
+describe('planning parameters on the project', () => {
+  it('travels with the project through a save and reload', () => {
+    // The limits are the whole regulatory feature. Held in a screen's state they
+    // vanish on the next tab change and nobody enters a bye-law schedule twice,
+    // so they belong on the project — which means they have to survive the JSON
+    // round trip that saving a project is.
+    const base = createProject(
+      {
+        name: 'Persistence',
+        buildingType: 'commercial_plaza',
+        location: { city: 'Islamabad', country: 'Pakistan', authority: 'CDA' },
+        displayUnit: 'ft',
+        plotWidthMm: toMm(100, 'ft'),
+        plotDepthMm: toMm(100, 'ft'),
+        cores: [],
+        floors: [
+          {
+            name: 'Ground Floor',
+            level: 0,
+            clearHeightMm: toMm(12, 'ft'),
+            floorToFloorMm: toMm(13, 'ft'),
+            rooms: [{ name: 'Hall', use: 'retail', widthMm: toMm(50, 'ft'), depthMm: toMm(50, 'ft') }],
+          },
+        ],
+      },
+      NOW,
+    );
+
+    const planning: PlanningParameters = {
+      authority: 'CDA',
+      source: 'CDA Building Regulations 2020, Schedule II',
+      recordedAt: NOW,
+      // One floor of 50 x 50 on a 100 x 100 plot is FAR 0.25, so 0.10 is a limit
+      // this building genuinely breaches — the point is to prove the reloaded
+      // figure reaches the checker, which a limit it passes would not show.
+      maxFar: 0.1,
+      maxGroundCoverage: 0.2,
+    };
+
+    const saved = JSON.parse(JSON.stringify({ ...base, planning })) as typeof base;
+    expect(saved.planning?.maxFar).toBe(0.1);
+    expect(saved.planning?.source).toMatch(/Schedule II/);
+
+    // And the reloaded figures still drive the checker.
+    const report = checkRegulations(saved.architecture, saved.planning!);
+    const far = report.observations.find((o) => o.code === 'FAR');
+    expect(far?.severity).toBe('exceeds_limit');
+    expect(far?.parameterSource).toMatch(/Schedule II/);
+  });
+
+  it('reports every check as not-checkable when nothing has been entered', () => {
+    // The state the application ships in, and the state it must stay in until
+    // someone enters a real limit with a real source.
+    const report = checkRegulations(arch(2), { authority: 'CDA' });
+    expect(report.observations.length).toBeGreaterThan(0);
+    for (const o of report.observations) {
+      expect(o.severity).toBe('not_checkable');
+    }
+  });
+});

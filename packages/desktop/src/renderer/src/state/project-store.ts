@@ -28,6 +28,7 @@ import {
   type Floor,
   type Project,
   type VersionId,
+  type PlanningParameters,
 } from '@adp/core';
 
 export interface ProjectStore {
@@ -41,6 +42,15 @@ export interface ProjectStore {
   readonly reviewAcknowledged: boolean;
 
   setProject(project: Project): void;
+  /**
+   * Record the planning limits for this plot.
+   *
+   * Not an architecture edit — it changes no geometry — so it does not need an
+   * authorisation and does not go on the undo stack. It does need to persist,
+   * which is the whole point: limits held in a screen's state vanish on the
+   * next tab change, and nobody enters a bye-law schedule twice.
+   */
+  setPlanning(planning: PlanningParameters | undefined): void;
   acknowledgeReview(value: boolean): void;
   /** Run an architecture edit. Returns null on success, or the refusal reason. */
   applyEdit(run: (arch: ArchitectureLayer, auth: ReturnType<typeof userAuthorisation>) => EditResult): string | null;
@@ -68,6 +78,11 @@ export function useProjectStore(): ProjectStore {
   const setProject = useCallback((next: Project) => {
     setProjectState(next);
     historyRef.current = new History(next.architecture, 'Opened project');
+    setRevision((r) => r + 1);
+  }, []);
+
+  const setPlanning = useCallback((planning: PlanningParameters | undefined) => {
+    setProjectState((current) => (current ? { ...current, planning } : current));
     setRevision((r) => r + 1);
   }, []);
 
@@ -219,6 +234,7 @@ export function useProjectStore(): ProjectStore {
     lastMessage,
     reviewAcknowledged,
     setProject,
+    setPlanning,
     acknowledgeReview: setReviewAcknowledged,
     applyEdit,
     undo,

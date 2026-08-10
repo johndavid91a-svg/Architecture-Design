@@ -91,11 +91,13 @@ Node 20 or later. Tested on Node 22.22.2, Linux.
 - [x] A missing parameter yields `not_checkable`, not silence
 - [x] Every report carries the disclaimer
 - [x] Actual requirements, common practice and assumptions are kept distinct
+- [x] Limits are stored on the project: they save, reload and drive the report
+- [x] A limit cannot be saved without naming the bye-law it came from
 - [ ] **No Pakistani by-laws loaded** — see §5
 
 ### Quality
 
-- [x] 141 tests passing, 0 failing
+- [x] 143 tests passing, 0 failing
 - [x] Core and desktop type-check clean
 - [x] `contextIsolation: true`, `nodeIntegration: false`, strict CSP, no generic `invoke(channel)`
 - [x] No temporary hacks: every fix in `TESTING_REPORT.md` §7 is a fix to the cause
@@ -152,7 +154,18 @@ attribute. To make estimates produce totals, either:
   rather than guessing at them; or
 - enter rates in the application, which records source, URL and date per rate.
 
-**3. CDA and RDA building by-laws.** Blocked from this machine:
+**3. CDA and RDA building by-laws.** Re-tested on 10 August: still blocked, and
+not selectively — the proxy answers `403` to `CONNECT` for every host outside
+GitHub and the package registries, Wikipedia included. So this is not something
+I can resolve by trying harder.
+
+What changed instead is that entering them is now worth doing: limits are stored
+on the project, survive reload, and appear in the report with the clause they
+came from. Give me the schedule for your plot category and it is a five-minute
+job; until then the checker reports `not_checkable`, which is the correct answer
+rather than a missing feature.
+
+Blocked from this machine:
 `cda.gov.pk`, `rda.gop.pk`, `lda.gop.pk`, `pec.org.pk`. What is needed is the
 published setback, ground coverage, FAR and parking figures by plot category.
 Until then the checker reports `not_checkable` — which is correct, but it means

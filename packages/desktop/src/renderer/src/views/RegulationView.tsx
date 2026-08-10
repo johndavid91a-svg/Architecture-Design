@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   checkRegulations,
   computeMetrics,
   PARAMETER_SOURCES,
   parseLength,
+  formatLength,
   type PlanningParameters,
 } from '@adp/core';
 import type { ProjectStore } from '../state/project-store.js';
@@ -47,6 +48,44 @@ export function RegulationView({ store }: Props): JSX.Element {
   const { project } = store;
   const [draft, setDraft] = useState<Draft>(EMPTY);
 
+  /**
+   * Fill the form from whatever the project already has.
+   *
+   * Keyed on the project id, so reopening a saved project shows the limits it
+   * was checked against rather than an empty form beside a report full of
+   * numbers — which would leave the user unable to tell where those numbers came
+   * from, or to correct one.
+   */
+  const hydratedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!project || hydratedFor.current === project.id) return;
+    hydratedFor.current = project.id;
+
+    const p = project.planning;
+    setDraft(
+      p
+        ? {
+            maxFar: p.maxFar?.toString() ?? '',
+            maxGroundCoverage: p.maxGroundCoverage ? (p.maxGroundCoverage * 100).toString() : '',
+            maxHeight: p.maxHeightMm ? formatLength(p.maxHeightMm, 'ft', { imperialInches: true }) : '',
+            maxFloors: p.maxFloors?.toString() ?? '',
+            frontSetback: p.frontSetbackMm
+              ? formatLength(p.frontSetbackMm, 'ft', { imperialInches: true })
+              : '',
+            rearSetback: p.rearSetbackMm
+              ? formatLength(p.rearSetbackMm, 'ft', { imperialInches: true })
+              : '',
+            sideSetback: p.sideSetbackMm
+              ? formatLength(p.sideSetbackMm, 'ft', { imperialInches: true })
+              : '',
+            parkingPer: p.parkingBaysPerSqft ? Math.round(1 / p.parkingBaysPerSqft).toString() : '',
+            parkingProvided: p.parkingBaysProvided?.toString() ?? '',
+            source: p.source ?? '',
+          }
+        : EMPTY,
+    );
+  }, [project]);
+
   const authority = project?.architecture.site.location.authority ?? 'OTHER_PK';
   const sourceInfo = PARAMETER_SOURCES[authority];
 
@@ -71,9 +110,41 @@ export function RegulationView({ store }: Props): JSX.Element {
     [authority, draft],
   );
 
+  /**
+   * Whether these figures have anywhere to have come from.
+   *
+   * A limit is exactly as trustworthy as its provenance, which is the rule the
+   * price book already runs on: a rate with no source is worse than no rate,
+   * because it is quoted with the same confidence as a real one. A setback
+   * someone half-remembered is the same hazard, so nothing is saved until the
+   * bye-law it came from is named.
+   */
+  const entered = [
+    draft.maxFar,
+    draft.maxGroundCoverage,
+    draft.maxHeight,
+    draft.maxFloors,
+    draft.frontSetback,
+    draft.rearSetback,
+    draft.sideSetback,
+    draft.parkingPer,
+    draft.parkingProvided,
+  ].filter((v) => v.trim() !== '').length;
+  const sourced = draft.source.trim().length > 0;
+  const savedPlanning = project?.planning;
+  const dirty =
+    entered > 0 &&
+    JSON.stringify({ ...params, recordedAt: undefined }) !==
+      JSON.stringify({ ...(savedPlanning ?? {}), recordedAt: undefined });
+
+  // The saved figures are what the report is built from, so what is on screen
+  // matches what a saved project will reopen with.
   const report = useMemo(
-    () => (project ? checkRegulations(project.architecture, params) : null),
-    [project, params],
+    () =>
+      project
+        ? checkRegulations(project.architecture, project.planning ?? { authority })
+        : null,
+    [project, authority],
   );
   const metrics = useMemo(
     () => (project ? computeMetrics(project.architecture) : null),
@@ -188,6 +259,52 @@ export function RegulationView({ store }: Props): JSX.Element {
             <input id="rv-pv" value={draft.parkingProvided} onChange={set('parkingProvided')} placeholder="e.g. 12" />
           </div>
         </div>
+
+        <div className="row" style={{ marginTop: 14 }}>
+          <button
+            className="primary"
+            disabled={!project || entered === 0 || !sourced || !dirty}
+            onClick={() => store.setPlanning({ ...params, recordedAt: new Date().toISOString() })}
+            title={
+              entered === 0
+                ? 'Enter at least one limit'
+                : !sourced
+                  ? 'Name the bye-law these came from first'
+                  : dirty
+                    ? 'Save these limits with the project'
+                    : 'Already saved'
+            }
+          >
+            {dirty ? `Save ${entered} limit(s)` : 'Saved'}
+          </button>
+          {savedPlanning && (
+            <button
+              className="ghost"
+              onClick={() => {
+                store.setPlanning(undefined);
+                setDraft(EMPTY);
+              }}
+            >
+              Clear
+            </button>
+          )}
+          <span className="small muted">
+            {savedPlanning?.recordedAt
+              ? `Recorded ${new Date(savedPlanning.recordedAt).toLocaleDateString()} — ${savedPlanning.source ?? 'no source'}`
+              : 'Nothing recorded yet, so every check reports not-checkable.'}
+          </span>
+        </div>
+
+        {entered > 0 && !sourced && (
+          <div className="notice" style={{ marginTop: 8 }}>
+            <strong>Name where these figures came from before saving them.</strong>
+            <div className="small" style={{ marginTop: 4 }}>
+              A limit is worth exactly what its provenance is worth. This application refuses to
+              quote a price it cannot attribute, and a half-remembered setback is the same hazard —
+              it reads with the same authority as one taken from the schedule.
+            </div>
+          </div>
+        )}
       </div>
 
       {issues.length > 0 && (

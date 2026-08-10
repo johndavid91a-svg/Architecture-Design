@@ -43,6 +43,7 @@ import type { Design } from './model/design.js';
 import { emptyDesign } from './model/design.js';
 import { recomputeBoundingWalls } from './model/edit.js';
 import { addCores, type CoreKind, type StairCheck } from './model/circulation.js';
+import type { PlanningParameters } from './regulation/checker.js';
 import { buildDoubleLoadedFloor, type PlateSpec } from './layout/double-loaded.js';
 import { toMm } from './units.js';
 
@@ -59,6 +60,16 @@ export interface Project {
    * not what it is.
    */
   readonly stairChecks?: readonly StairCheck[];
+  /**
+   * The planning limits that apply to this plot, as entered from the bye-laws.
+   *
+   * Stored on the project rather than held in the Regulation screen, because a
+   * limit that evaporates when you change tab is a limit nobody will enter
+   * twice. These are the figures the whole regulatory feature runs on: they save
+   * with the project, load with it, and appear in the report beside the
+   * observations they produced.
+   */
+  readonly planning?: PlanningParameters;
 }
 
 /** One room as the user enters it: a name, a use, and two dimensions. */
