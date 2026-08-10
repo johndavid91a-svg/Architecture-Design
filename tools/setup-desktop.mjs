@@ -14,7 +14,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,10 +104,55 @@ const alreadyPackaged =
   existsSync(releaseDir) &&
   readdirSync(releaseDir).some((f) => /unpacked|\.exe$|\.AppImage$|\.dmg$|^mac/.test(f));
 
-let packaged = alreadyPackaged;
-if (alreadyPackaged) {
-  note('Already packaged. Skipping.');
+/**
+ * Is the packaged application older than the code it was built from?
+ *
+ * Skipping the build when a package already exists saves several minutes on a
+ * re-run, and silently ships the previous version when the source has moved on.
+ * That is the worst possible failure here: the user updates, runs this, and gets
+ * the identical bug back with no indication why — which is exactly what happened
+ * to somebody who updated after a fix and saw the same error, because they were
+ * still running the old build.
+ */
+function packageIsStale() {
+  if (!alreadyPackaged) return false;
+  const newest = (dir) => {
+    let latest = 0;
+    const walk = (d) => {
+      for (const entry of readdirSync(d, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'release' || entry.name === 'out') continue;
+        const full = join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else latest = Math.max(latest, statSync(full).mtimeMs);
+      }
+    };
+    try {
+      walk(dir);
+    } catch {
+      /* Unreadable tree: treat as unknown rather than as fresh. */
+      return Infinity;
+    }
+    return latest;
+  };
+
+  const built = (() => {
+    let earliest = Infinity;
+    for (const f of readdirSync(releaseDir)) {
+      if (!/unpacked|\.exe$|\.AppImage$|\.dmg$|^mac/.test(f)) continue;
+      earliest = Math.min(earliest, statSync(join(releaseDir, f)).mtimeMs);
+    }
+    return earliest;
+  })();
+
+  return newest(join(repo, 'packages')) > built;
+}
+
+const stale = packageIsStale();
+let packaged = alreadyPackaged && !stale;
+if (packaged) {
+  note('Already packaged and up to date. Skipping.');
 } else {
+  if (stale) note('The packaged application is older than the code — rebuilding it.');
   note('Building a standalone application. This downloads Electron — a few minutes.');
   // A failure here is not fatal: the shortcut falls back to starting the
   // project directly, which is slower but works. Better a working icon than
