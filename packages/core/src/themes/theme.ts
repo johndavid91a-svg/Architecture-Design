@@ -315,6 +315,95 @@ export const THEMES: readonly Theme[] = [
     furnitureStyle: 'contemporary.office',
     avoid: 'False ceilings in open areas, feature walls, and any applied decoration.',
   },
+  /*
+   * Two substitutions worth stating, because the catalogue cannot express the
+   * intent literally and a silent near-miss would be read later as a mistake:
+   *
+   *  - The floor wants dark timber or a dark stone tile. There is no timber
+   *    flooring material; `mat_granite` (#4a4a4e) is the only genuinely dark
+   *    floor in the catalogue and is used for it. Reaching for `mat_door_flush`
+   *    to get the timber colour would put "Flush door with frame" into the
+   *    takeoff measured in `each`, which is how a finish choice corrupts a BOQ.
+   *  - The deep feature colour wants a dark paint. Paint is one material with
+   *    one appearance, so a "deep colour" cannot be asked for by id at all;
+   *    `mat_brick_common` (#9c5a3c) carries the warmth honestly as a material
+   *    rather than pretending emulsion can be two colours at once.
+   *
+   * No façade and no landscaping: this theme describes an interior, and a
+   * basement lounge has neither. `designFromTheme` falls back to plaster_paint
+   * if it is ever applied to a whole building.
+   */
+  {
+    id: T('theme_recreation_lounge'),
+    name: 'Recreation Lounge',
+    family: 'hospitality',
+    identity:
+      'A below-ground games and tea lounge: dark underfoot, warm above, lit low and locally so the ' +
+      'room reads as an evening rather than as a working day.',
+    palette: {
+      primary: '#241d18',
+      secondary: '#c9ae86',
+      accent: '#2f5d4a',
+      neutralLight: '#f1eadd',
+      neutralDark: '#2e251d',
+      accentUsage: 'Baize, upholstery, the counter front and one wall per games room. Never on floors or ceilings.',
+    },
+    materials: {
+      // Circulation is left to inherit the primary floor: one unbroken dark
+      // surface is the point, and a lighter lobby would announce the exit.
+      primaryFloor: M('mat_granite'),
+      secondaryFloor: M('mat_carpet_tile'),
+      primaryWall: M('mat_paint_emulsion'),
+      featureWall: M('mat_brick_common'),
+      ceiling: M('mat_gypsum_ceiling'),
+    },
+    // Flat, not coffered: a coffer books a 450 mm drop, and a basement at
+    // 2515 mm clear cannot afford it. Not checked against local bye-laws.
+    ceilingKind: 'gypsum_flat',
+    lighting: {
+      primary: 'cove',
+      feature: 'linear_led',
+      colourTemperatureK: 2700,
+      description:
+        'Warm indirect light from a perimeter cove, with linear runs picking out the play areas. The ' +
+        'ambient level is deliberately low, and nothing overhead reads as a grid.',
+    },
+    signatureElements: [
+      {
+        where: 'lounge',
+        element: 'A low pendant dropped over the games table, with dark surfaces on every side of it',
+        rationale:
+          'Pulls the light down onto the table and leaves the rest of the floor in shadow, which is what ' +
+          'makes a games room feel like one rather than like a hall with a table in it.',
+      },
+      {
+        where: 'retail',
+        element: 'Timber-fronted tea counter with warm backlit shelving above',
+        rationale:
+          'The counter becomes the only lit object on that side of the floor, so it does the work of a ' +
+          'sign without anyone having to hang one.',
+      },
+      {
+        where: 'any',
+        element: 'Planting massed in one corner rather than dotted along the perimeter',
+        rationale:
+          'Grouped greenery reads as somewhere to sit near; evenly spaced planters read as an office ' +
+          'corridor, which is the exact impression this theme exists to avoid.',
+      },
+    ],
+    // `lounge.recreation` currently claims the games and counter items only. It
+    // does not claim `seating.sofa.3`, `seating.lounge.chair` or
+    // `decor.planter.large`, so the furniture list handed to the AI omits the
+    // soft seating and the planting that the signature elements above ask for.
+    // Those three items need the style key adding in the furniture catalogue;
+    // until they have it the gap is here in writing rather than discovered in a
+    // render, because a style that matches nothing at all falls back to the
+    // whole catalogue and would quietly offer the AI office desks instead.
+    furnitureStyle: 'lounge.recreation',
+    avoid:
+      'Grid ceilings, cool white light, pale porcelain floors, neon strip used as decoration, sports-bar ' +
+      'signage, and printed graphics of any kind.',
+  },
 ];
 
 const THEME_INDEX = new Map(THEMES.map((t) => [t.id, t]));

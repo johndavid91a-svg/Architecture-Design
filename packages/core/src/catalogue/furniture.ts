@@ -9,6 +9,11 @@
  * `clearanceFront` is the space a person needs to actually use the item — chair
  * pull-out at a desk, drawer travel at a cabinet. It is the difference between a
  * layout that fits on paper and one that works.
+ *
+ * It describes ONE face, the item's front. Anything needing space on more than
+ * one side — a cue swing all round a pool table, a foosball table with a player
+ * at each end — says so in its `note`, because the field cannot express it and a
+ * layout that validates would otherwise still be unusable.
  */
 
 import type { Millimetres } from '../units.js';
@@ -23,7 +28,13 @@ export type FurnitureCategory =
   | 'bed'
   | 'display'
   | 'equipment'
-  | 'decor';
+  | 'decor'
+  // Recreation and hospitality contents. `games` covers the tables and boards
+  // that fill a lounge floor — they are contents of a room, never rooms
+  // themselves. `counter` is a serving counter; calling it a reception desk
+  // because the joinery looks similar would misdescribe what the room does.
+  | 'games'
+  | 'counter';
 
 export interface FurnitureItem {
   /** Stable catalogue key referenced by `FurniturePlacement.catalogueKey`. */
@@ -215,6 +226,104 @@ export const FURNITURE: readonly FurnitureItem[] = [
     clearanceFront: 700,
     styles: ['residential'],
     placeholderColorHex: '#b9aa96',
+  },
+
+  // Recreation-lounge contents. Every one of these carries both style keys, so
+  // whichever single string a recreation theme puts in `furnitureStyle` reaches
+  // all of them. `bed.double` is the warning here: its lone `residential` style
+  // is claimed by no theme, which makes it unreachable through
+  // `furnitureForStyle` and quietly absent from every layout.
+  {
+    key: 'games.pool.9ft',
+    name: 'Pool table, 9 ft American',
+    category: 'games',
+    width: 2900,
+    depth: 1626,
+    height: 800,
+    clearanceFront: 1500,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#1e5c40',
+    note: 'Cabinet size over rails and pockets; the playing surface itself is 2540 x 1270. The 1500 mm clearance is one cue length (1470 mm) and is needed on all four sides, not only the front — a table with a cue length at one end and a wall at the other cannot be played.',
+  },
+  {
+    key: 'games.foosball',
+    name: 'Foosball table',
+    category: 'games',
+    width: 1500,
+    depth: 760,
+    height: 900,
+    clearanceFront: 700,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#3f6f4f',
+    note: 'Players stand at both ends and the handles slide out past the cabinet; the 700 mm clearance covers one end only.',
+  },
+  {
+    key: 'games.dartboard',
+    name: 'Dartboard, wall mounted',
+    category: 'games',
+    width: 600,
+    depth: 120,
+    height: 600,
+    clearanceFront: 2370,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#20242a',
+    note: 'The 2370 mm clearance is the throw line (oche), 7 ft 9.25 in from the face of the board — the whole reason a darts lane needs floor it does not appear to occupy. Wall mounted, but a placement carries no mounting height, so it draws standing on the floor.',
+  },
+  {
+    key: 'counter.servery.3000',
+    name: 'Servery counter 3000',
+    category: 'counter',
+    width: 3000,
+    depth: 700,
+    height: 1050,
+    clearanceFront: 900,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#8a6a4a',
+    note: 'The 900 mm clearance is the customer side. Staff working space behind the counter is a separate allowance and is not expressed here.',
+  },
+  {
+    key: 'seating.stool.bar',
+    name: 'Bar stool',
+    category: 'seating',
+    width: 400,
+    depth: 400,
+    height: 750,
+    clearanceFront: 450,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#6f563f',
+  },
+  {
+    key: 'table.coffee.1200',
+    name: 'Coffee table 1200',
+    category: 'table',
+    width: 1200,
+    depth: 600,
+    height: 400,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#7d6448',
+  },
+  {
+    key: 'storage.shoe.rack',
+    name: 'Shoe rack 900',
+    category: 'storage',
+    width: 900,
+    depth: 350,
+    height: 900,
+    clearanceFront: 700,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#96795a',
+  },
+  {
+    key: 'decor.prayer.rug',
+    name: 'Prayer rug',
+    category: 'decor',
+    width: 1200,
+    depth: 700,
+    height: 20,
+    clearanceFront: 0,
+    styles: ['lounge.recreation', 'hospitality.warm'],
+    placeholderColorHex: '#6d2f36',
+    note: 'Laid in rows and stood on, not walked around, so the clearance is deliberately zero rather than absent — an inherited default here would reserve floor that a prayer hall needs for the next row.',
   },
 ];
 
