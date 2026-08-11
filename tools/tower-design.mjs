@@ -612,8 +612,8 @@ export const GROUND_CONCEPTS = {
     floor: FLOOR_EXEC,
     floorNote: 'Dark marble. The board calls it dark stone; marble is the catalogue’s stone line.',
     wall: WALL_WARM,
-    feature: WALL_FEATURE,
-    featureNote: 'The LED earth wall, clad. The screen itself is furniture, not a finish.',
+    feature: 'mat_timber_walnut',
+    featureNote: 'Walnut, which the board names and the catalogue now carries. It is UNPRICED — no published Islamabad rate was found for it; see the procurement note.',
     ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
     kelvin: 3000,
     lighting: [
@@ -621,7 +621,7 @@ export const GROUND_CONCEPTS = {
       ['linear_led', 8, 20, 'Vertical slats washed from below.'],
       ['pendant', 2, 40, 'Over the reception desk.'],
     ],
-    missing: 'Walnut and the vertical timber slats have no catalogue line. Plaster stands in for both, so the timber is described and NOT costed.',
+    missing: 'Walnut and the slat screen are now real catalogue lines and are MEASURED. Neither is PRICED: no published Islamabad rate was found for either.',
   },
   hub: {
     label: 'Concept 2 — Futuristic GIS Hub',
@@ -629,8 +629,8 @@ export const GROUND_CONCEPTS = {
     floor: FLOOR_EXEC,
     floorNote: 'White marble, polished — the palette is light and this is the lightest floor the catalogue has.',
     wall: WALL_CALM,
-    feature: 'mat_acp_panel',
-    featureNote: 'Panelled: the board’s brushed metal, and the closest real material to it.',
+    feature: 'mat_metal_brushed',
+    featureNote: 'Brushed stainless, as the board names. UNPRICED: stainless in Pakistan is sold by the KILOGRAM and tracks nickel weekly, so a square-foot rate has to come from a supplier against a stated gauge.',
     ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
     kelvin: 4000,
     lighting: [
@@ -638,7 +638,7 @@ export const GROUND_CONCEPTS = {
       ['cove', 6, 16, 'Slot round the reception and the void edge.'],
       ['wall_washer', 4, 12, 'On the data wall.'],
     ],
-    missing: 'Concrete and glass-light are described and not costed — no catalogue line for either as a finish.',
+    missing: 'Brushed stainless is measured but not priced. Concrete and glass-light remain described only.',
   },
   observatory: {
     label: 'Concept 3 — Luxury Earth Observation Centre',
@@ -646,8 +646,8 @@ export const GROUND_CONCEPTS = {
     floor: FLOOR_EXEC,
     floorNote: 'Black marble.',
     wall: WALL_WARM,
-    feature: WALL_FEATURE,
-    featureNote: 'The globe wall, clad, and lit from behind rather than in front.',
+    feature: 'mat_leather_upholstery',
+    featureNote: 'Leather upholstery to the globe wall, lit from behind. UNPRICED — no published rate found.',
     ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
     kelvin: 2700,
     lighting: [
@@ -656,7 +656,7 @@ export const GROUND_CONCEPTS = {
       ['wall_washer', 4, 12, 'Grazing the dark timber.'],
       ['pendant', 2, 30, 'Over the seating.'],
     ],
-    missing: 'GOLD METAL AND BROWN LEATHER HAVE NO CATALOGUE LINE, and they are most of what makes this scheme what it is. Both are described and not costed. Pricing this concept without them would understate it badly.',
+    missing: 'Gold trim and leather are now real lines and are MEASURED — the leather by area on the feature wall, the gold by the running foot as trim. NEITHER IS PRICED, and they are most of what makes this scheme what it is, so its total is the least complete of the three.',
   },
 };
 
@@ -742,7 +742,7 @@ function skyGarden() {
       // and the nearest by colour would put the wrong trade and the wrong unit
       // into the BOQ. The canopy is therefore described and NOT costed here —
       // it needs a real line added to the catalogue before it can be.
-      ceiling: { kind: 'stretch', dropHeight: 0 },
+      ceiling: { kind: 'stretch', materialId: 'mat_fabric_tensile', dropHeight: 0 },
       lighting: [
         warmLight('bollard', 8, 8, 'Low level along the routes. Nothing above head height except the canopy uplights.'),
         warmLight('linear_led', 6, 12, 'Concealed in the planter troughs, washing the planting.'),
