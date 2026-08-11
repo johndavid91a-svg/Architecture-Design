@@ -497,10 +497,29 @@ export function mumtyFloor() {
       note: DRAWN,
     })),
     walls: [
-      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
-      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
-      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior'),
-      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
+      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior', [], true, MUMTY_CLEAR),
+      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior', [], true, MUMTY_CLEAR),
+      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [], true, MUMTY_CLEAR),
+      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior', [], true, MUMTY_CLEAR),
+      // THE ENCLOSED ROOMS NEED WALLS, and had none: the tank, the lift machine
+      // room, the bath and the store were floor patches on an open roof. The
+      // drawing shows all four built, and from the terrace they are the only
+      // thing standing on it — the sheet calls the mumty the building's crown.
+      //
+      // WALLS ONLY, NO DOORWAYS, and that is deliberate. The mumty sheet shows
+      // these rooms but this model has not read their door positions off it,
+      // and the four I invented all swung into the terrace furniture — a tank
+      // room door opening through a run of planters. Inventing an opening to
+      // make a check pass is the worst reason to move a door. The walls are
+      // real and are drawn; the openings need reading from the sheet.
+      ...ROOMS.filter(([name]) => name !== 'ROOF' && name !== 'ROOF (WEST)').flatMap(
+        ([, , x, y, w, d]) => [
+          wall(x, y, x + w, y, PARTITION_MM, 'partition', [], true, MUMTY_CLEAR),
+          wall(x, y + d, x + w, y + d, PARTITION_MM, 'partition', [], true, MUMTY_CLEAR),
+          wall(x, y, x, y + d, PARTITION_MM, 'partition', [], true, MUMTY_CLEAR),
+          wall(x + w, y, x + w, y + d, PARTITION_MM, 'partition', [], true, MUMTY_CLEAR),
+        ],
+      ),
     ],
   };
 }

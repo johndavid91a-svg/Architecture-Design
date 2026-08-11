@@ -774,7 +774,7 @@ function skyGarden() {
         ...Array.from({ length: 4 }, (_, i) => ({
           key: 'outdoor.planter.trough',
           label: `Planter run E${i + 1}`,
-          position: at(38.6, 6 + i * 11),
+          position: at(38.6, 10 + i * 8.5),
           rotationDeg: 90,
         })),
       ],
@@ -812,13 +812,13 @@ function skyGarden() {
         ...Array.from({ length: 4 }, (_, i) => ({
           key: 'equipment.condenser.roof',
           label: `Condenser ${i + 1}`,
-          position: at(12.4 + (i % 2) * 5.4, 21.6 + Math.floor(i / 2) * 4.4),
+          position: at(12.8 + (i % 2) * 5.4, 25.5 + Math.floor(i / 2) * 4.4),
           rotationDeg: 0,
         })),
         ...Array.from({ length: 6 }, (_, i) => ({
           key: 'outdoor.solar.panel',
           label: `PV module ${i + 1}`,
-          position: at(13 + (i % 2) * 6, 31 + Math.floor(i / 2) * 4.5),
+          position: at(13 + (i % 2) * 6, 34 + Math.floor(i / 2) * 4.2),
           rotationDeg: 0,
         })),
       ],
