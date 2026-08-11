@@ -210,7 +210,9 @@ async function schemeDesignByRoom(scheme) {
       buildingType: 'commercial_plaza',
       location: { city: 'Islamabad', country: 'Pakistan', authority: 'CDA' },
       displayUnit: 'ft',
-      floors: [scheme.basementFloor()],
+      // A scheme may be one storey or a whole stack. `floors()` is the general
+      // form; `basementFloor()` is kept because the basement scheme predates it.
+      floors: scheme.floors ? scheme.floors() : [scheme.basementFloor()],
     },
     new Date().toISOString(),
   );
@@ -257,7 +259,9 @@ async function main() {
       ok: true,
       filename: schemePath,
       format: 'pdf',
-      floors: [scheme.basementFloor()],
+      // A scheme may be one storey or a whole stack. `floors()` is the general
+      // form; `basementFloor()` is kept because the basement scheme predates it.
+      floors: scheme.floors ? scheme.floors() : [scheme.basementFloor()],
       units: { unit: 'mm', source: 'file_header', confident: true, note: 'Scheme drawn to the architect’s dimensions.' },
       issues: [],
       stats: null,
