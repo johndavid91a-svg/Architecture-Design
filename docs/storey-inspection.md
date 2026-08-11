@@ -72,6 +72,34 @@ and exits non-zero.
 | Fourth — Executive | yes | Four suites at the corners, boardroom across the middle, lounge south of it. |
 | Mumty — Sky garden | yes | Paved terrace, PV and condensers on the west strip, tea counter, lounge, planting to the east parapet. |
 
+## Independent confirmation from SECTION A-A
+
+The levels in the model were read from the level tags on each floor plan. Page
+50, **SECTION AT A-A**, states the whole stack in one place and was not used to
+build anything — so it is a genuine second source, and it agrees exactly:
+
+| Level | Section A-A | Model |
+|---|---|---|
+| Road | ±0'-0" | — |
+| Basement floor | (-)9'-9" | -9'-9" |
+| Ground floor | +2'-6" | +2'-6" |
+| Mezzanine floor | +12'-3" | +12'-3" |
+| First floor | +21'-3" | +21'-3" |
+| Second floor | +33'-0" | +33'-0" |
+| Third floor | +44'-9" | +44'-9" |
+| 4th floor | +56'-6" | +56'-6" |
+| Mumty | +68'-3" | +68'-3" |
+| **Top roof** | **+77'-3"** | **77'-3"** |
+
+Ten levels, ten matches, from a sheet that had never been opened. It also
+carries the storey heights the front elevation gave — 11'-0" clear plus a 9"
+slab on the upper floors, 8'-3" plus 9" at the basement, 8'-6" plus 6" at the
+mumty — and names two things the plans do not: a LIFT PIT and a MACHINE ROOM,
+with a level at EL. -15'-0" below the basement.
+
+**The lift pit is not in the model.** It is below the basement slab and nothing
+built so far reaches it.
+
 ## Still open, and not guessable from here
 
 - **The mumty's door positions.** On the sheet, unread.
@@ -83,6 +111,7 @@ and exits non-zero.
 - **`walk-storeys.mjs` photographs architecture only.** Installing a design
   means driving the app's designer channel, which `ui-journey.mjs` does; the two
   do not share it yet.
-- **Sections A-A to D-D, the rear elevation and the structural grid sheets** are
-  read but unused. They would confirm beam depths and column positions
-  independently of the floor plans.
+- **The lift pit at EL. -15'-0"**, named on section A-A and not modelled.
+- **Sections B-B to D-D, the rear elevation and the structural grid sheets** are
+  read but unused. A-A has now been used and confirmed every level; the others
+  would confirm beam depths and column positions.
