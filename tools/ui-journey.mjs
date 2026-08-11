@@ -41,6 +41,19 @@ const outDir = resolve(passed[passed.length - 1] ?? join(here, '..', 'journey'))
 const pdfFlag = process.argv.indexOf('--pdf');
 const pdfPath = pdfFlag >= 0 ? resolve(process.argv[pdfFlag + 1]) : null;
 
+/**
+ * A hand-built scheme to import instead of a file.
+ *
+ *   … tools/ui-journey.mjs --scheme <module.mjs> <out-dir>
+ *
+ * The module exports floors in the same `CandidateFloor` shape a drawing
+ * importer produces, so a proposal goes through the app's own validation and
+ * materialise rather than a side door that would let it be wrong in ways a real
+ * import could not be.
+ */
+const schemeFlag = process.argv.indexOf('--scheme');
+const schemePath = schemeFlag >= 0 ? resolve(process.argv[schemeFlag + 1]) : null;
+
 app.disableHardwareAcceleration();
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -77,7 +90,21 @@ const step = (label, result) => {
 async function main() {
   await mkdir(outDir, { recursive: true });
 
-  if (pdfPath) {
+  if (schemePath) {
+    const scheme = await import(pathToFileURL(schemePath).href);
+    ipcMain.handle('import:drawing', async () => ({
+      cancelled: false,
+      ok: true,
+      filename: schemePath,
+      format: 'pdf',
+      floors: [scheme.basementFloor()],
+      units: { unit: 'mm', source: 'file_header', confident: true, note: 'Scheme drawn to the architect’s dimensions.' },
+      issues: [],
+      stats: null,
+    }));
+    ipcMain.handle('import:drawingSheets', async () => []);
+    ipcMain.handle('import:drawingSheet', async () => ({ error: 'no sheets' }));
+  } else if (pdfPath) {
     const drawing = await import(
       pathToFileURL(join(desktop, 'dist-test', 'drawing-import.js')).href
     );
@@ -132,13 +159,14 @@ async function main() {
   };
 
   // ---- Build a building --------------------------------------------------
-  if (pdfPath) {
+  const importing = pdfPath || schemePath;
+  if (importing) {
     // The setup screen asks how to start before it offers the file picker.
     step('the setup screen offers to attach a drawing', await run(CLICK, 'button', 'Attach an architectural drawing'));
     await wait(600);
     step('the file picker is offered', await run(CLICK, 'button', 'Attach a drawing'));
     // A 56-sheet set takes about ten seconds to read.
-    await wait(30_000);
+    await wait(schemePath ? 2500 : 30_000);
     const read = await win.webContents.executeJavaScript(
       `(document.querySelector('.card')?.textContent || '').trim()`,
     );
@@ -173,7 +201,7 @@ async function main() {
 
   // ---- 2D plan -----------------------------------------------------------
   step('the 2D Plan tab opens', await run(CLICK, 'nav button', '2D Plan'));
-  await wait(pdfPath ? 3000 : 700);
+  await wait(importing ? 3000 : 700);
   await shot('plan-dark');
 
   step('the Paper contrast button is there', await run(CLICK, 'button', 'Paper'));
@@ -188,7 +216,7 @@ async function main() {
   // A nine-storey import is 3,000-odd walls to extrude, and under software
   // rendering the first painted frame lags the DOM by seconds. Screenshotting
   // too early captures the previous tab, which looks like a working screenshot.
-  await wait(pdfPath ? 9000 : 1500);
+  await wait(importing ? 9000 : 1500);
   await shot('model-orbit');
 
   const status = await win.webContents.executeJavaScript(
@@ -200,7 +228,7 @@ async function main() {
   });
 
   step('one floor at a time can be turned on', await run(CHECK, 'Only this floor', true));
-  await wait(pdfPath ? 3000 : 700);
+  await wait(importing ? 3000 : 700);
   await shot('model-one-floor');
 
   step('and turned off again', await run(CHECK, 'Only this floor', false));

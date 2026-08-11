@@ -759,6 +759,19 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     ground.receiveShadow = true;
     scene.add(ground);
 
+    /**
+     * The ground is only drawn when you are looking at something above it.
+     *
+     * A basement sits BELOW the ground plane, so the plane buries it: selecting
+     * B1 gave an empty site with three signs floating over it, and the storey
+     * was rendering perfectly the whole time, three metres underneath. This is
+     * not a basement-only problem — every building in this set has one.
+     */
+    const showGroundFor = (level: number) => {
+      const floor = floors.find((f) => f.level === level);
+      ground.visible = (floor?.elevation ?? 0) >= 0;
+    };
+
     const modelCentre = centroid([
       { x: modelBounds.minX, y: modelBounds.minY },
       { x: modelBounds.maxX, y: modelBounds.minY },
@@ -772,11 +785,19 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     // the plan put the camera inside the stack with the top four floors off
     // screen. The target rises to the middle of the building for the same
     // reason.
-    const buildingHeightM =
-      floors.reduce((tallest, f) => Math.max(tallest, f.elevation + f.floorToFloor), 0) * MM;
+    // Top and bottom of the building, not just the top.
+    //
+    // A basement has a NEGATIVE elevation, so measuring from zero says a
+    // basement-only model is nothing high and puts the camera above ground
+    // looking at an empty site. The extent runs from the lowest slab to the
+    // highest head.
+    const lowestM = floors.reduce((low, f) => Math.min(low, f.elevation), 0) * MM;
+    const highestM =
+      floors.reduce((high, f) => Math.max(high, f.elevation + f.floorToFloor), 0) * MM;
+    const buildingHeightM = Math.max(3, highestM - lowestM);
     const target = new THREE.Vector3(
       modelCentre.x * MM,
-      Math.max(2, buildingHeightM / 2),
+      lowestM + buildingHeightM / 2,
       -modelCentre.y * MM,
     );
     ground.position.x = target.x;
@@ -1027,6 +1048,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     const applyFloorVisibility = () => {
       scaleSigns();
       const selected = floors[floorIndexRef.current];
+      showGroundFor(selected?.level ?? 0);
       const only = isolateRef.current ? selected?.level : undefined;
 
       for (const [level, group] of floorGroups) {
