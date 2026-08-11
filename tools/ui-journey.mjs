@@ -177,6 +177,14 @@ async function main() {
       `(document.querySelector('.overlay.tl .small.muted')?.textContent || '').trim()`,
     );
 
+  // Walk into a wall on purpose. The old resolver pushed out of every wall in
+  // turn, so a walker in a corner ended the frame wedged inside geometry with no
+  // way out — the commonest complaint about the walkthrough.
+  step('walls can be walked through when the geometry traps you', await run(CHECK, 'Walk through walls', true));
+  await wait(400);
+  step('and made solid again', await run(CHECK, 'Walk through walls', false));
+  await wait(400);
+
   step('there is a way to the stairs', await run(CLICK, 'button', 'Go to stairs'));
   await wait(1200);
   await shot('walk-in-stairs');

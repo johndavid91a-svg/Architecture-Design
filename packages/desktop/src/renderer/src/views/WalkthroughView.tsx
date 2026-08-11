@@ -48,6 +48,16 @@ const FLYAROUND_PERIOD_S = 26;
 const EYE_HEIGHT_MM = 1650;
 const WALK_SPEED_MM_PER_S = 3000;
 const COLLISION_RADIUS_MM = 300;
+/**
+ * Shortest wall fragment that is allowed to block the walker.
+ *
+ * Narrower than a doorway. A traced plan produces hundreds of stubs a few
+ * hundred millimetres long — corners, hatch remnants, furniture outlines — and
+ * treating each as solid turns a floor into a minefield of invisible posts you
+ * cannot see, cannot walk round and cannot understand. A real wall shorter than
+ * this blocks nothing worth blocking.
+ */
+const MIN_OBSTACLE_MM = 700;
 const MM = 0.001; // millimetres to scene metres
 
 /**
@@ -149,6 +159,13 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const goToEntranceRef = useRef(false);
   /** Set from the UI to stand the walker in the stair or the lift. */
   const goToCoreRef = useRef<'stair' | 'lift' | null>(null);
+  /** Walk through walls. The escape hatch when the geometry is approximate. */
+  const [ghost, setGhost] = useState(false);
+  const ghostRef = useRef(ghost);
+  ghostRef.current = ghost;
+  /** True when the walker began the frame already inside geometry. */
+  const stuckRef = useRef(false);
+  const [stuck, setStuck] = useState(false);
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -881,26 +898,65 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
      * cheap, it cannot tunnel through a wall at speed, and it works on the
      * centreline data the twin already holds instead of on render geometry.
      */
-    const resolveCollisions = (position: THREE.Vector3, level: number) => {
-      const p = new THREE.Vector2(position.x / MM, -position.z / MM);
+    /**
+     * How deep the walker is inside the worst wall at this point, and which one.
+     *
+     * Only the DEEPEST overlap is returned, because resolving every wall in one
+     * sweep is what made walking through an imported building impossible. The old
+     * loop pushed out of each wall in turn, so a walker in a corner was shoved
+     * out of wall A into wall B, out of B back into A, and ended the frame
+     * somewhere neither of them agreed on. In a traced plan — hundreds of wall
+     * fragments, many of them overlapping — that reliably ended with the camera
+     * wedged inside geometry with no way out.
+     */
+    const worstOverlap = (p: THREE.Vector2, level: number) => {
+      let worst: { push: THREE.Vector2; depth: number } | null = null;
       for (const seg of wallSegments) {
         if (seg.level !== level) continue;
         const ab = new THREE.Vector2().subVectors(seg.b, seg.a);
         const lenSq = ab.lengthSq();
-        if (lenSq === 0) continue;
+        // A fragment shorter than a doorway is trace noise, not an obstacle.
+        // Colliding with them turns a floor into a minefield of invisible posts.
+        if (lenSq < MIN_OBSTACLE_MM * MIN_OBSTACLE_MM) continue;
         let t = new THREE.Vector2().subVectors(p, seg.a).dot(ab) / lenSq;
         t = Math.max(0, Math.min(1, t));
         const closest = new THREE.Vector2().copy(seg.a).addScaledVector(ab, t);
         const away = new THREE.Vector2().subVectors(p, closest);
         const dist = away.length();
         const minDist = seg.halfThickness + COLLISION_RADIUS_MM;
-        if (dist < minDist && dist > 0.001) {
-          away.multiplyScalar((minDist - dist) / dist);
-          p.add(away);
-        }
+        if (dist >= minDist) continue;
+        const depth = minDist - dist;
+        if (worst !== null && depth <= worst.depth) continue;
+        // Dead centre on the line gives no direction to push in; use the wall's
+        // normal rather than dividing by zero.
+        const push =
+          dist > 1
+            ? away.clone().multiplyScalar(depth / dist)
+            : new THREE.Vector2(-ab.y, ab.x).normalize().multiplyScalar(depth);
+        worst = { push, depth };
       }
-      position.x = p.x * MM;
-      position.z = -p.y * MM;
+      return worst;
+    };
+
+    /**
+     * Push the walker out of whatever it has walked into.
+     *
+     * Returns false when it could not be resolved — the caller then leaves the
+     * walker where it was instead of committing a move into a wall, which is
+     * what turns "you cannot walk here" into "you are stuck here forever".
+     */
+    const resolveCollisions = (position: THREE.Vector3, level: number): boolean => {
+      const p = new THREE.Vector2(position.x / MM, -position.z / MM);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const worst = worstOverlap(p, level);
+        if (!worst) {
+          position.x = p.x * MM;
+          position.z = -p.y * MM;
+          return true;
+        }
+        p.add(worst.push);
+      }
+      return false;
     };
 
     /**
@@ -1205,10 +1261,32 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         if (move.lengthSq() > 0) {
           const speed = (keys.has('ShiftLeft') ? 2 : 1) * WALK_SPEED_MM_PER_S * MM;
           move.normalize().multiplyScalar(speed * dt);
-          walkPos.add(move);
-          resolveCollisions(walkPos, floor?.level ?? 0);
+
+          if (ghostRef.current) {
+            walkPos.add(move);
+          } else {
+            const from = walkPos.clone();
+            const level = floor?.level ?? 0;
+            const stuckToStart =
+              worstOverlap(new THREE.Vector2(from.x / MM, -from.z / MM), level) !== null;
+
+            walkPos.add(move);
+            if (!resolveCollisions(walkPos, level) && !stuckToStart) {
+              // The move ended somewhere unresolvable and the walker was fine
+              // where it started, so refuse the move rather than commit to it.
+              walkPos.copy(from);
+            }
+
+            // Already inside something when the frame began — a spawn point in a
+            // wall, or geometry that overlaps itself, both of which a traced plan
+            // produces. Moving is the only way out, so it is allowed, and the
+            // prompt below offers the way out that always works.
+            stuckRef.current = stuckToStart;
+          }
         }
         walkPos.y = elevation + EYE_HEIGHT_MM * MM;
+
+        if (sunFrame % 6 === 0 && stuck !== stuckRef.current) setStuck(stuckRef.current);
 
         // Offer the core the walker is standing in, and only the directions
         // that actually lead somewhere.
@@ -1445,6 +1523,22 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
           <input
             type="checkbox"
+            checked={ghost}
+            onChange={(e) => setGhost(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          <span className="small">Walk through walls</span>
+        </label>
+        <div className="small muted">
+          {ghost
+            ? 'Walls are not solid. Use this to get out of anywhere you are stuck.'
+            : 'Walls are solid. Tick this if a room traps you — an imported plan’s walls are ' +
+              'approximate, and some of them overlap.'}
+        </div>
+
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+          <input
+            type="checkbox"
             checked={showSigns}
             onChange={(e) => setShowSigns(e.target.checked)}
             style={{ width: 'auto' }}
@@ -1555,6 +1649,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           {sunInfo}
         </div>
       </div>
+
+      {stuck && mode === 'walk' && !ghost && !riding && (
+        <div className="transport-prompt" style={{ borderColor: 'var(--err)' }}>
+          <strong>You are inside a wall</strong>
+          <div className="small" style={{ marginTop: 4 }}>
+            Tick <em>Walk through walls</em> to step out, or use <em>Go to entrance</em>.
+          </div>
+        </div>
+      )}
 
       {riding && mode === 'walk' && (
         <div className="transport-prompt">
