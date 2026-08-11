@@ -114,6 +114,17 @@ function hallBoundary() {
  */
 const GLAZED_W = 40 - (20 + 4 / 12);
 
+/** One glazed panel, given its start and end along the wall. */
+const frontGlazingPanel = (fromFt, toFt, heightFt, sillFt) => ({
+  kind: 'window',
+  distanceAlongWall: Math.round(((fromFt + toFt) / 2) * FT),
+  width: Math.round((toFt - fromFt) * FT),
+  height: Math.round(heightFt * FT),
+  sillHeight: Math.round(sillFt * FT),
+  confidence: 'extracted',
+  note: 'Glazing to the hall front, beside the entrance.',
+});
+
 /** A glazed opening across the hall's front, for one storey. */
 const frontGlazing = (heightFt, sillFt) => ({
   kind: 'window',
@@ -155,11 +166,22 @@ const DRAWN = 'From the architect’s drawing. Unchanged.';
 const PROPOSED = 'Proposed partition. New construction, not on the architect’s drawing.';
 const PROPOSED_ROOM = 'Proposed. Formed by new partitions inside the drawn hall.';
 
-const wall = (x1, y1, x2, y2, thickness, fn, openings = [], drawn = true) => ({
+/**
+ * `height` defaults to a typical storey's 11'-0" clear.
+ *
+ * The ground floor is NOT typical: it runs +2'-6" to +21'-3", 18'-9" under the
+ * mezzanine void, and its walls were being built at 11'-0" like everyone
+ * else's. The app caught it the moment glazing went in — OPENING_TOO_TALL, "a
+ * window was taller than its wall and was dropped" — and the whole front
+ * elevation of the ground floor silently vanished. A wall shorter than the room
+ * it encloses is wrong on its own; it only became visible because something
+ * finally leaned on it.
+ */
+const wall = (x1, y1, x2, y2, thickness, fn, openings = [], drawn = true, heightMm = CLEAR) => ({
   start: P(x1, y1),
   end: P(x2, y2),
   thickness,
-  height: CLEAR,
+  height: heightMm,
   function: fn,
   loadBearing: fn === 'exterior',
   confidence: drawn ? 'extracted' : 'inferred',
@@ -501,12 +523,17 @@ export function groundFloor() {
       note: '30\'-2" x 42\'-10", double height under the mezzanine void: +2\'-6" to +21\'-3".',
     },
     {
-      name: 'BALCONY',
-      use: 'balcony',
+      // PLANTER, not BALCONY. The ground sheet names KITCHEN, LOBBY, HALL,
+      // PLANTER, STAIRS, LIFT, EMG. STAIRS, BATH and DUCT — and no balcony. The
+      // balcony starts at the first floor. This was a balcony copied down from
+      // the typical floor, which put 47 sq ft of external deck on the storey
+      // that has the entrance in it.
+      name: 'PLANTER',
+      use: 'landscape',
       boundary: rect(BALCONY.x, BALCONY.y, BALCONY.w, BALCONY.d),
       clearHeight: CLEAR,
       confidence: 'inferred',
-      note: 'Labelled, not dimensioned. Measured off the line work.',
+      note: 'Labelled on the sheet, not dimensioned. Extent measured off the line work.',
     },
   ];
   return {
@@ -525,19 +552,27 @@ export function groundFloor() {
       confidence: 'extracted',
       note: DRAWN,
     }]),
-    walls: [
-      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
-      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
+    walls: ((H) => [
+      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior', [], true, H),
+      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior', [], true, H),
       // The entrance, in the GLAZED run — not in the balcony bay, which is where
       // it was and where there is a fin screen in front of it.
+      // Glazing in TWO panels, one each side of the entrance.
+      //
+      // A shopfront door sits inside its glazed screen, but the twin models an
+      // opening as a hole in a wall and two holes cannot overlap: drawn as one
+      // 19'-8" run with an 8'-0" door inside it, materialise kept one and
+      // dropped the other, and the ground floor lost its glazing without
+      // saying so.
       wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [
+        frontGlazingPanel(0, GLAZED_W / 2 - 4, 16, 2.5),
         door(GLAZED_W / 2, 8),
-        frontGlazing(16, 2.5),
-      ]),
-      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
-      wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
-      wall(CORE_W, 18.5, CORE_W, 45, EXTERIOR_MM, 'interior', [door(21.5, 3.5)]),
-    ],
+        frontGlazingPanel(GLAZED_W / 2 + 4, GLAZED_W, 16, 2.5),
+      ], true, H),
+      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior', [], true, H),
+      wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior', [], true, H),
+      wall(CORE_W, 18.5, CORE_W, 45, EXTERIOR_MM, 'interior', [door(21.5, 3.5)], true, H),
+    ])(Math.round(18.75 * FT)), // +2'-6" to +21'-3"
   };
 }
 

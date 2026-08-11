@@ -377,6 +377,84 @@ export const BASE_MATERIALS: readonly Material[] = [
     defaultWastage: 0.02,
     trades: ['electrician'],
   },
+  // ---------------------------------------------------------------------------
+  // Specification materials the concept boards call for.
+  //
+  // Added because the design layer was naming them in prose and NOT costing
+  // them, which is the worst of both: the model said "walnut" and the BOQ had no
+  // line for it, so a bill produced from that model was quietly short. Each one
+  // carries the unit its trade actually measures in — that is the whole reason
+  // the wrong reach hurts, as brick measured in thousands and a door measured in
+  // each have both already put nonsense into a wall-area line here.
+  //
+  // NO RATES. These carry dimensions, appearance and trade only. Prices come
+  // from the price sources for Islamabad / Rawalpindi and are never invented.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'mat_timber_walnut' as MaterialId,
+    name: 'Walnut veneered panelling',
+    category: 'joinery',
+    basis: 'area',
+    takeoffUnit: 'sqft',
+    defaultWastage: 0.12,
+    trades: ['carpenter', 'helper'],
+    appearance: { baseColorHex: '#5b3a24', roughness: 0.45, metalness: 0, textureScaleMm: 1400 },
+  },
+  {
+    id: 'mat_timber_slat_screen' as MaterialId,
+    name: 'Vertical timber slat screen',
+    category: 'joinery',
+    basis: 'area',
+    takeoffUnit: 'sqft',
+    defaultWastage: 0.15,
+    trades: ['carpenter', 'helper'],
+    appearance: { baseColorHex: '#8a6a45', roughness: 0.6, metalness: 0, textureScaleMm: 300 },
+  },
+  {
+    id: 'mat_metal_brushed' as MaterialId,
+    name: 'Brushed stainless panel',
+    category: 'metalwork',
+    basis: 'area',
+    takeoffUnit: 'sqft',
+    defaultWastage: 0.1,
+    trades: ['facade_installer', 'helper'],
+    appearance: { baseColorHex: '#a8adb3', roughness: 0.32, metalness: 0.85, textureScaleMm: 900 },
+  },
+  {
+    id: 'mat_metal_gold' as MaterialId,
+    name: 'Gold-finish metal trim',
+    category: 'metalwork',
+    // LENGTH, not area. It is a trim — a reveal, a shadow gap, an edge — and
+    // measuring it by the square foot is how a 30 m run of beading becomes a
+    // wall's worth of gold in a bill.
+    basis: 'length',
+    takeoffUnit: 'rft',
+    defaultWastage: 0.1,
+    trades: ['carpenter', 'facade_installer'],
+    appearance: { baseColorHex: '#b08d44', roughness: 0.25, metalness: 0.9 },
+  },
+  {
+    id: 'mat_leather_upholstery' as MaterialId,
+    name: 'Leather wall upholstery',
+    category: 'wall_finish',
+    basis: 'area',
+    takeoffUnit: 'sqft',
+    defaultWastage: 0.18,
+    trades: ['carpenter', 'helper'],
+    appearance: { baseColorHex: '#6b4a33', roughness: 0.7, metalness: 0, textureScaleMm: 700 },
+  },
+  {
+    id: 'mat_fabric_tensile' as MaterialId,
+    name: 'PTFE / PVC fibre tensile membrane',
+    category: 'facade',
+    basis: 'area',
+    takeoffUnit: 'sqft',
+    // A tensile panel is cut from a roll to a doubly-curved pattern, so the
+    // offcut is far higher than a flat sheet material's.
+    defaultWastage: 0.25,
+    trades: ['facade_installer', 'steel_fixer'],
+    appearance: { baseColorHex: '#e8e3d8', roughness: 0.85, metalness: 0 },
+  },
 ];
 
 const MATERIAL_INDEX = new Map(BASE_MATERIALS.map((m) => [m.id, m]));
