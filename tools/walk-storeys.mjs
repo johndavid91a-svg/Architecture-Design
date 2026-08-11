@@ -17,6 +17,10 @@
  * gets anywhere near a photograph. Inspecting a building is its own job and
  * should cost what it costs and nothing more.
  *
+ * IT PHOTOGRAPHS ARCHITECTURE, NOT DESIGN. Installing a design means driving the
+ * app's designer channel, which `ui-journey.mjs` does; until that is shared
+ * between them, passing --design here is refused rather than ignored.
+ *
  * WHAT IT DOES. For each storey, in order: isolate it, orbit it through several
  * bearings, then stand inside it at the stair and at the entrance. Everything it
  * drives is a real control in the real renderer — it clicks the same buttons a
@@ -148,11 +152,25 @@ async function main() {
   await wait(1500);
 
   if (designPath) {
-    // The design is installed through the app's own designer channel, which is
-    // where `ui-journey.mjs` already proves the route works. This tool only
-    // photographs, so if there is no design it photographs the architecture and
-    // says so rather than failing.
-    console.log(`  design: ${designPath}`);
+    // REFUSE, do not pretend.
+    //
+    // This tool accepted --design and then did nothing with it, so the first
+    // full run photographed seven storeys of bare architecture while the status
+    // line read "0 furniture item(s)" and every caption claimed a design was
+    // loaded. A flag that is accepted and ignored is worse than one that does
+    // not exist: it produces a plausible, complete, wrong answer.
+    //
+    // Installing a design means driving the app's designer channel, which
+    // ui-journey.mjs already does. Until that is shared between the two, this
+    // says so and stops.
+    console.error(
+      '\n  --design is not implemented here yet.\n' +
+        '  A design is installed through the app\'s designer channel, which\n' +
+        '  tools/ui-journey.mjs drives. Use that with --inspect for a designed\n' +
+        '  building, or drop --design to photograph the architecture alone.\n',
+    );
+    app.exit(2);
+    return;
   }
 
   await run(CLICK, 'nav button', '3D');
