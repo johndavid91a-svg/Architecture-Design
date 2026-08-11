@@ -675,7 +675,12 @@ function groundLobby(concept) {
     finishes: [
       floor(c.floor, c.floorNote),
       wall(c.wall),
-      featureWall(c.feature, 'north', c.featureNote),
+      // 'east', not 'north'. The hall's north edge sits 2'-2" inside the shell
+      // — that is what 30'-2" x 42'-10" leaves in a 45' building — so the north
+      // shell wall does not bound this room and asking for north silently
+      // resolved to a 42'-10" side wall instead. The reception faces east
+      // anyway, which is where the data wall goes.
+      featureWall(c.feature, 'east', c.featureNote),
       skirting(),
     ],
     ceiling: c.ceiling,

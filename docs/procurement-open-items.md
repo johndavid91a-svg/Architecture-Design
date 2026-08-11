@@ -42,36 +42,46 @@ all three because the roof does not change with the lobby.
 
 | Concept | Material | Quantity | Unit |
 |---|---|---|---|
-| 1 — Geo-Spatial Lounge | Walnut veneered panelling | see caveat | sq ft |
-| 2 — Futuristic GIS Hub | Brushed stainless panel | see caveat | sq ft |
-| 3 — Earth Observation | Leather wall upholstery | see caveat | sq ft |
-| all three | PTFE / PVC tensile membrane | **770** | sq ft |
+| 1 — Geo-Spatial Lounge | Walnut veneered panelling | **803.1** | sq ft |
+| 2 — Futuristic GIS Hub | Brushed stainless panel | **803.1** | sq ft |
+| 3 — Earth Observation | Leather wall upholstery | **803.1** | sq ft |
+| all three | PTFE / PVC tensile membrane | **770.0** | sq ft |
 
-### The caveat, and it is a real one
+These are safe to send. The defect that made them unusable is fixed.
 
-**The three feature-wall quantities are wrong today and must not be sent to a
-supplier.** The takeoff reports 2,494.9 sq ft for each, which is the ground
-hall's *entire* wall area. The feature is one wall — the north — at 566 sq ft.
-The figure is overstated about **4.4x**.
+### What was wrong, and how it is now checked
 
-The cause is known and is in the application, not in this design:
-`computeTakeoff` reads `FinishAssignment.heightLimit` but never reads
-`FinishAssignment.wallId`, so a finish restricted to one wall is measured over
-every wall of the room, and the base finish is not reduced by it either. Until
-that is fixed, any BOQ carrying a feature wall is quantitatively wrong in both
-directions.
+The takeoff used to report **2,494.9 sq ft** for each feature wall — the ground
+hall's *entire* wall area — and to bill the base plaster over the same area
+again. 4,989.8 sq ft of finish on a room with 2,494.9 sq ft of wall.
 
-The membrane's 770 sq ft is sound: it is a ceiling area, not a wall, and no
-`wallId` is involved.
+`computeTakeoff` read `FinishAssignment.heightLimit` and never read
+`FinishAssignment.wallId`. A finish restricted to one wall was measured over
+every wall, and the base finish was not reduced by it. Wrong in both directions
+at once, both toward a bigger bill.
+
+Now:
+
+| line | quantity |
+|---|---|
+| Walnut, feature wall | 803.1 |
+| Cement plaster, the rest | 1,691.7 |
+| **total** | **2,494.9** — the room's wall area, once |
+
+The same change makes a dado stop double-billing: paint above it is measured on
+the height the dado leaves, not on the full wall behind the tile.
 
 ## What to do next
 
-1. Fix `wallId` in `computeTakeoff`, and add a "from height X up" primitive so
-   paint above a dado stops being billed behind the tile.
-2. Re-run these quantities.
-3. Send them to the suppliers above and import the replies through the app's
+1. ~~Fix `wallId` in `computeTakeoff`~~ — done. Feature walls and dados both
+   measure once now.
+2. ~~Re-run these quantities~~ — done, and they are in the table above.
+3. **Send them to the suppliers above** and import the replies through the app's
    quotation import as **Level 3 — supplier quote**, which is the highest tier
-   below an official published rate.
+   below an official published rate. The importer wants a CSV with columns
+   `description`, `specification`, `unit`, `amount`, `supplier`.
 
 Until step 3, these six lines carry a quantity and no rate, and any total that
-includes them is visibly incomplete rather than quietly wrong.
+includes them is visibly incomplete rather than quietly wrong. That is the
+intended state: a bill that is honestly short is useful, and one that is
+silently guessed at is not.

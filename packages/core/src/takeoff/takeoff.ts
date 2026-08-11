@@ -112,6 +112,45 @@ function roomWallFaceAreaMm2(room: Room, walls: readonly Wall[]): { area: number
   return { area: Math.max(0, gross - deduction), derivation };
 }
 
+
+/**
+ * The face area of ONE wall as it bounds a room.
+ *
+ * A finish naming a `wallId` is a feature wall, and it covers that wall and
+ * nothing else. Measuring it over the whole room — which is what happened until
+ * this existed — overstated a single feature wall by about 4.4x on the ground
+ * floor hall, and left the base finish unreduced behind it. Wrong in both
+ * directions at once, and both in the direction of a bigger bill.
+ *
+ * Only the run the wall SHARES with the room counts. A shell wall can run the
+ * length of a building while the room touches a fraction of it.
+ */
+function oneWallFaceAreaMm2(
+  room: Room,
+  wall: Wall,
+): { area: number; derivation: string } {
+  const xs = room.boundary.map((p) => p.x);
+  const ys = room.boundary.map((p) => p.y);
+  const box = {
+    minX: Math.min(...xs), maxX: Math.max(...xs),
+    minY: Math.min(...ys), maxY: Math.max(...ys),
+  };
+  const horizontal = Math.abs(wall.end.y - wall.start.y) < Math.abs(wall.end.x - wall.start.x);
+  const [a, b, lo, hi] = horizontal
+    ? [wall.start.x, wall.end.x, box.minX, box.maxX]
+    : [wall.start.y, wall.end.y, box.minY, box.maxY];
+  const run = Math.max(0, Math.min(Math.max(a, b), hi) - Math.max(Math.min(a, b), lo));
+  const gross = run * room.clearHeight;
+  const deduction = deductibleOpeningAreaMm2(wall.openings);
+  return {
+    area: Math.max(0, gross - deduction),
+    derivation:
+      `wall run shared with room ${fromMm(run, 'ft').toFixed(2)} ft x clear height ` +
+      `${fromMm(room.clearHeight, 'ft').toFixed(2)} ft = ${fromMm2(gross, 'ft2').toFixed(2)} sq ft, ` +
+      `less openings totalling ${fromMm2(deduction, 'ft2').toFixed(2)} sq ft`,
+  };
+}
+
 function finishesFor(design: RoomDesign | undefined, surface: FinishAssignment['surface']): FinishAssignment[] {
   if (!design) return [];
   return design.finishes.filter((f) => f.surface === surface);
@@ -195,11 +234,51 @@ export function computeTakeoff(floors: readonly Floor[], design?: Design): Takeo
           roomId: room.id,
         });
       }
-      for (const finish of wallFinishes) {
+      // A FEATURE WALL IS ONE WALL, AND WHAT IS BEHIND IT IS NOT ALSO FINISHED.
+      //
+      // Each finish naming a `wallId` takes that wall's own face. What remains
+      // of the room is then shared out among the finishes that name no wall: a
+      // dado takes its height fraction of it and the full-height finish takes
+      // what the dados leave. Before this, every finish was measured over the
+      // whole room at full height — so a room with a feature wall and a dado
+      // was billed roughly three times its own wall area.
+      const featureFinishes = wallFinishes.filter((f) => f.wallId);
+      const roomWideFinishes = wallFinishes.filter((f) => !f.wallId);
+
+      let claimedSqft = 0;
+      for (const finish of featureFinishes) {
+        const namedWall = floor.walls.find((w) => w.id === finish.wallId);
+        if (!namedWall) continue;
+        const face = oneWallFaceAreaMm2(room, namedWall);
         const material = findMaterial(finish.materialId);
-        // A dado stops partway up; quantity scales by the height limit.
         const factor = finish.heightLimit ? Math.min(1, finish.heightLimit / room.clearHeight) : 1;
-        const qty = wallSqft * factor;
+        const qty = fromMm2(face.area, 'ft2') * factor;
+        claimedSqft += qty;
+        lines.push({
+          key: `wall_finish:${room.id}:${finish.materialId}:${finish.wallId}`,
+          description: `${room.name} — ${material?.name ?? 'wall finish'} (feature wall)`,
+          materialId: finish.materialId,
+          unit: material?.takeoffUnit ?? priceUnitForArea(),
+          quantity: qty,
+          basis: 'measured_from_model',
+          derivation: `${face.derivation}; one named wall, not the room`,
+          floorId: floor.id,
+          roomId: room.id,
+        });
+      }
+
+      const remainingSqft = Math.max(0, wallSqft - claimedSqft);
+      // Dados first, then whatever height they leave for the full-height finish.
+      const dadoFraction = roomWideFinishes
+        .filter((f) => f.heightLimit)
+        .reduce((sum, f) => sum + Math.min(1, f.heightLimit! / room.clearHeight), 0);
+
+      for (const finish of roomWideFinishes) {
+        const material = findMaterial(finish.materialId);
+        const factor = finish.heightLimit
+          ? Math.min(1, finish.heightLimit / room.clearHeight)
+          : Math.max(0, 1 - dadoFraction);
+        const qty = remainingSqft * factor;
         lines.push({
           key: `wall_finish:${room.id}:${finish.materialId}:${finish.heightLimit ?? 'full'}`,
           description: `${room.name} — ${material?.name ?? 'wall finish'}${
@@ -209,9 +288,14 @@ export function computeTakeoff(floors: readonly Floor[], design?: Design): Takeo
           unit: material?.takeoffUnit ?? priceUnitForArea(),
           quantity: qty,
           basis: 'measured_from_model',
-          derivation: finish.heightLimit
-            ? `${wall.derivation}; scaled to height limit (factor ${factor.toFixed(3)})`
-            : wall.derivation,
+          derivation:
+            `${wall.derivation}` +
+            (claimedSqft > 0 ? `; less ${claimedSqft.toFixed(2)} sq ft of feature wall` : '') +
+            (finish.heightLimit
+              ? `; to height limit (factor ${factor.toFixed(3)})`
+              : dadoFraction > 0
+                ? `; above dado (factor ${factor.toFixed(3)})`
+                : ''),
           floorId: floor.id,
           roomId: room.id,
         });
