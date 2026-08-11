@@ -1590,12 +1590,24 @@ export function WalkthroughView({ project, floors, design, designs, onSelectDesi
             const halfDepth = core.radiusMm - 900;
             const y = core.kind === 'stair' ? core.at.y - halfDepth + 900 : core.at.y;
             walkPos.z = -y * MM;
-            // Face the way the core is used, not wherever you happened to be
-            // looking. A core's doorway is on its low-y wall, which is scene +Z,
-            // so yaw 0 looks out of the lift; a stair flight runs the other way,
-            // so yaw π looks up it. Arriving nose-first against a blank panel
-            // makes a working lift look like a rendering failure.
-            yaw = core.kind === 'lift' ? 0 : Math.PI;
+            // FACE THE FLOOR, NOT THE WALL BEHIND THE CORE.
+            //
+            // This used to face a fixed direction per kind — yaw 0 out of a
+            // lift, yaw π up a stair — on the assumption that every core is
+            // oriented the same way. It is not: on the tower's upper floors
+            // that assumption put the walker nose-first against a blank pier,
+            // one flat surface filling the whole screen, which reads as a
+            // broken renderer rather than as a stair.
+            //
+            // Turning to face the middle of the storey always has something to
+            // look at, whatever way round the core happens to sit.
+            const facing = { x: modelCentre.x - core.at.x, y: modelCentre.y - core.at.y };
+            yaw =
+              Math.hypot(facing.x, facing.y) > 500
+                ? Math.atan2(facing.x, -facing.y)
+                : core.kind === 'lift'
+                  ? 0
+                  : Math.PI;
             pitch = core.kind === 'stair' ? 0.25 : 0;
             applyFloorVisibility();
           }
