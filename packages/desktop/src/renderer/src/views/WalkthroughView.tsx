@@ -1355,11 +1355,42 @@ export function WalkthroughView({ project, floors, design, designs, onSelectDesi
       }
     };
 
+    /**
+     * What the camera should be looking at, given what is visible.
+     *
+     * Isolating a storey used to hide the others and leave the camera exactly
+     * where it was — so picking a floor showed you whatever happened to be in
+     * front of the lens. Zoomed in, the ground floor filled the frame with one
+     * wall and the third floor came back completely black, and neither told you
+     * anything was wrong: the storey WAS rendering, off to the side.
+     *
+     * Only orbit is re-framed. Someone walking has put themselves somewhere on
+     * purpose and moving them would be worse than the problem.
+     */
+    let framedOn: number | null | undefined;
+    const frameOn = (only: number | undefined) => {
+      if (modeRef.current !== 'orbit') return;
+      if (framedOn === (only ?? null)) return;
+      framedOn = only ?? null;
+      const floor = only === undefined ? undefined : floors.find((f) => f.level === only);
+      if (floor) {
+        // One storey: look at its middle, from far enough to see the plan.
+        target.y = (floor.elevation + floor.floorToFloor / 2) * MM;
+        orbitDistance = Math.max(spanX, spanY, 12) * 1.5;
+      } else {
+        target.y = lowestM + buildingHeightM / 2;
+        orbitDistance = Math.max(spanX, spanY, buildingHeightM, 12) * 1.6;
+      }
+      sun.target.position.copy(target);
+      applyOrbit();
+    };
+
     const applyFloorVisibility = () => {
       scaleSigns();
       const selected = floors[floorIndexRef.current];
       showGroundFor(selected?.level ?? 0);
       const only = isolateRef.current ? selected?.level : undefined;
+      frameOn(only);
 
       for (const [level, group] of floorGroups) {
         group.visible = only === undefined || level === only;

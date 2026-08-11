@@ -535,6 +535,53 @@ async function main() {
   await wait(importing ? 3000 : 700);
   await shot('model-one-floor');
 
+  // ---- Inspect every storey ----------------------------------------------
+  //
+  //   … tools/ui-journey.mjs --inspect <out-dir>
+  //
+  // Every judgement about how this building looks has so far come from one
+  // orbit view of the whole stack, which is the view that hides everything: at
+  // that distance a room with the wrong floor, a chair through a desk and a
+  // light that never fires all look identical. This isolates each storey in
+  // turn and photographs it from above and from inside, so there is a picture
+  // of every floor to actually look at.
+  if (process.argv.includes('--inspect')) {
+    const buttons = await win.webContents.executeJavaScript(`(function () {
+      const row = document.querySelector('.floor-buttons');
+      if (!row) return { ok: false, why: 'no floor buttons' };
+      return { ok: true, labels: [...row.querySelectorAll('button')].map((b) => b.textContent.trim()) };
+    })()`);
+    step('the floor list is readable', buttons);
+    for (const label of buttons.labels ?? []) {
+      // Interpolate the label directly. The first version built the comparison
+      // with a placeholder and then tried to `.replace()` it — matching single
+      // quotes against a string JSON.stringify had written with double ones, so
+      // the swap never happened, every button compared against the literal word
+      // and not one floor was photographed. The loop still reported success,
+      // because it only counted the labels it had READ.
+      const picked = await win.webContents.executeJavaScript(`(function () {
+        const row = document.querySelector('.floor-buttons');
+        if (!row) return { ok: false };
+        const b = [...row.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+        if (!b) return { ok: false, saw: [...row.querySelectorAll('button')].map((x) => x.textContent.trim()) };
+        b.click();
+        return { ok: true };
+      })()`);
+      step(`floor ${label} selected`, picked);
+      if (!picked.ok) continue;
+      await wait(1600);
+      const name = label.replace(/[^\w.-]/g, '_');
+      await shot(`floor-${name}-plan`);
+      // And from inside it, standing at the stair.
+      await run(CLICK, 'button', 'Go to stairs');
+      await wait(1400);
+      await shot(`floor-${name}-inside`);
+      await run(CLICK, 'button', 'Orbit');
+      await wait(600);
+    }
+    step('every storey was photographed', { ok: (buttons.labels ?? []).length > 0 });
+  }
+
   step('and turned off again', await run(CHECK, 'Only this floor', false));
   await wait(500);
 
