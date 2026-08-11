@@ -24,16 +24,34 @@ const BUILDING = { w: 40, d: 43.5 };
 /** The hall, from the drawing: 30'-2" x 42'-10", east of the service strip. */
 const HALL = { x: 9.833, y: 0, w: 30.167, d: 42.833 };
 
-/** What the architect drew. None of it moves. */
+/**
+ * What the architect drew. None of it moves.
+ *
+ * Positions come from the label coordinates on the basement layout sheet, read
+ * at the page's own scale and anchored on the hall. Two of them settled
+ * questions I had been about to ask:
+ *
+ *  - the U.G.W.T sits in the hall's NORTH-WEST corner, 5'-2" to 15'-2" down from
+ *    the hall's north wall and hard against its west wall — not in the middle,
+ *    which is where I had assumed it and which forced a corridor that cost the
+ *    café a third of its area;
+ *  - the stair runs from about 15 ft to 34 ft down the west side, so it opens
+ *    onto the MIDDLE of the hall's west wall, not the south end.
+ *
+ * The west strip's own internal order is taken from the sheet as drawn. A label
+ * sits near the middle of its room but not exactly, so these are within a foot
+ * or two — which does not matter for anything except the tank, whose position
+ * against the hall is read directly and is the one that governs the layout.
+ */
 const FIXED = [
   { name: 'KITCHEN', note: `8'-5" x 6'-4"`, x: 1.2, y: 0.5, w: 8.417, d: 6.333 },
-  { name: 'BATH', note: `4'-7" x 5'-5½"`, x: 1.2, y: 7.0, w: 4.583, d: 5.458 },
-  { name: 'SUMP', note: `3' x 5'`, x: 0.4, y: 13.0, w: 3, d: 5 },
+  { name: 'BATH', note: `4'-7" x 5'-5½"`, x: 1.2, y: 7.2, w: 4.583, d: 5.458 },
+  { name: 'SUMP', note: `3' x 5'`, x: 0.4, y: 13.2, w: 3, d: 5 },
   { name: 'M.H', note: '', x: 4.2, y: 13.4, w: 2.6, d: 2.6 },
   { name: 'M.H', note: '', x: 7.0, y: 13.4, w: 2.6, d: 2.6 },
-  { name: 'U.G.W.T', note: `10' x 10' x 6'`, x: 9.833, y: 13.0, w: 10, d: 10 },
-  { name: 'STAIRS', note: `8'-4½" x 18'-10"`, x: 1.2, y: 18.8, w: 8.375, d: 18.833 },
-  { name: 'LIFT', note: `7'-6" x 6'-3"`, x: 1.2, y: 38.0, w: 7.5, d: 5.25 },
+  { name: 'U.G.W.T', note: `10' x 10' x 6'`, x: 10.13, y: 5.5, w: 10, d: 10 },
+  { name: 'STAIRS', note: `8'-4½" x 18'-10"`, x: 1.2, y: 15.4, w: 8.375, d: 18.833 },
+  { name: 'LIFT', note: `7'-6" x 6'-3"`, x: 1.2, y: 34.7, w: 7.5, d: 6.25 },
 ];
 
 /**
@@ -46,47 +64,45 @@ const FIXED = [
 const ZONES = [
   {
     name: 'TUCK SHOP / CAFÉ',
-    note: `10'-0" x 11'-0"  ·  110 sq ft`,
-    sub: 'plus the existing kitchen behind it',
-    x: 9.833, y: 0.5, w: 10, d: 11, hue: '#8a5a2b', enclosed: true,
+    note: `11'-0" x 9'-0"  ·  99 sq ft`,
+    sub: 'servery; the existing kitchen is its back-of-house',
+    x: 20.9, y: 0.8, w: 11, d: 9, hue: '#8a5a2b', enclosed: true,
+  },
+  {
+    name: 'PRAYER ROOM (MALE)',
+    note: `18'-10" x 15'-6"  ·  292 sq ft`,
+    sub: 'about 33 people',
+    x: 20.9, y: 10.8, w: 18.83, d: 15.5, hue: '#1f6b3a', enclosed: true,
   },
   {
     name: 'ABLUTION',
     note: `4'-4" x 9'-0"  ·  39 sq ft`,
-    x: 20.0, y: 0.5, w: 4.333, d: 9, hue: '#2f7f7f', enclosed: true,
-  },
-  {
-    name: 'PRAYER ROOM (MALE)',
-    note: `15'-6" x 18'-10"  ·  292 sq ft`,
-    x: 24.5, y: 0.5, w: 15.5, d: 18.833, hue: '#1f6b3a', enclosed: true,
+    x: 16.4, y: 16.3, w: 4.333, d: 9, hue: '#2f7f7f', enclosed: true,
   },
   {
     name: 'POOL TABLE',
     note: `18'-6" x 14'-0"  ·  259 sq ft`,
     sub: '9-ft table, full cue clearance · table tennis folds out here',
-    x: 20.0, y: 22.5, w: 18.5, d: 14, hue: '#1d4f8c',
+    x: 20.9, y: 27.3, w: 18.5, d: 14, hue: '#1d4f8c',
   },
   {
     name: 'FOOSBALL',
-    note: `6'-6" x 10'-6"  ·  68 sq ft`,
-    x: 9.833, y: 23.5, w: 6.5, d: 10.5, hue: '#5a3f8c',
+    note: `6'-0" x 10'-6"  ·  63 sq ft`,
+    x: 10.1, y: 16.3, w: 6, d: 10.5, hue: '#5a3f8c',
   },
   {
-    // Two boards on the hall's west wall. An oche is 7'-9¼" from the board face
-    // and a thrower wants about 2 ft behind, so the lane is 10 ft deep; 4 ft of
-    // width apiece keeps two games out of each other's way.
+    // Two boards on the hall's south wall, throwing north. An oche is 7'-9¼"
+    // from the board face with about 2 ft behind the thrower, so the lane is
+    // 10 ft deep; 4 ft apiece keeps two games out of each other's way.
     name: 'DARTS (2 BOARDS)',
-    note: `10'-0" deep x 8'-0" wide  ·  80 sq ft`,
-    sub: 'boards on the west wall, two lanes',
-    x: 9.833, y: 34.5, w: 10, d: 8, hue: '#8c4a1d',
-  },
-  {
-    name: 'LOUNGE / LED',
-    note: `12'-0" x 5'-10"  ·  70 sq ft`,
-    sub: `LED 12'-0" x 6'-9" on the south wall`,
-    x: 24.0, y: 37.0, w: 12, d: 5.833, hue: '#7a2f5a',
+    note: `8'-0" wide x 10'-0" deep  ·  80 sq ft`,
+    sub: 'boards on the south wall, two lanes',
+    x: 10.1, y: 32.7, w: 8, d: 10.1, hue: '#8c4a1d',
   },
 ];
+
+/** The LED wall, and the seating in front of it. Drawn, but it costs no floor. */
+const LED = { x: 20.9, y: 42.3, w: 12, d: 0.5 };
 
 // ---- Check, do not assume ------------------------------------------------
 const overlaps = (a, b) =>
@@ -222,6 +238,10 @@ const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="back
   <rect x="${X(0)}" y="${Y(0)}" width="${(BUILDING.w * K).toFixed(1)}" height="${(BUILDING.d * K).toFixed(1)}"
         fill="none" stroke="#101418" stroke-width="5"/>
   ${box(HALL, 'none', '#b8c2cc', true)}
+
+  <!-- LED wall, mounted; the sofas in front of it sit in the circulation -->
+  <rect x="${X(LED.x)}" y="${Y(LED.y)}" width="${(LED.w * K).toFixed(1)}" height="${(LED.d * K).toFixed(1)}" fill="#7a2f5a" stroke="#7a2f5a"/>
+  <text x="${X(LED.x + LED.w / 2)}" y="${Y(LED.y) - 6}" text-anchor="middle" font-size="10" font-weight="700" fill="#7a2f5a">LED WALL 12'-0" x 6'-9" &middot; sofas loose in front</text>
 
   <!-- proposed zones -->
   ${ZONES.map((z) => box(z, `${z.hue}22`, z.hue)).join('')}
