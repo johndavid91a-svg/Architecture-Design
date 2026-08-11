@@ -13,10 +13,10 @@
  * it photographs is what ships.
  */
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..', 'packages', 'desktop');
@@ -26,6 +26,20 @@ const passed = process.argv
   .slice(1)
   .filter((a) => !a.startsWith('-') && !a.endsWith('ui-journey.mjs'));
 const outDir = resolve(passed[passed.length - 1] ?? join(here, '..', 'journey'));
+
+/**
+ * A real drawing to import, instead of the built-in template.
+ *
+ *   … tools/ui-journey.mjs --pdf /path/to/set.pdf <out-dir>
+ *
+ * The file picker is the one thing a harness cannot drive, so the three import
+ * channels are answered here with this file. Everything behind them — the same
+ * `importDrawingFile` the app's own main process calls — runs for real, which is
+ * the point: the interesting failures are in reading the drawing, not in the
+ * dialog that chose it.
+ */
+const pdfFlag = process.argv.indexOf('--pdf');
+const pdfPath = pdfFlag >= 0 ? resolve(process.argv[pdfFlag + 1]) : null;
 
 app.disableHardwareAcceleration();
 
@@ -62,6 +76,20 @@ const step = (label, result) => {
 
 async function main() {
   await mkdir(outDir, { recursive: true });
+
+  if (pdfPath) {
+    const drawing = await import(
+      pathToFileURL(join(desktop, 'dist-test', 'drawing-import.js')).href
+    );
+    ipcMain.handle('import:drawing', async () => {
+      const payload = await drawing.importDrawingFile(pdfPath);
+      return { cancelled: false, ...payload };
+    });
+    ipcMain.handle('import:drawingSheets', async (_e, path) => drawing.listDrawingSheets(path));
+    ipcMain.handle('import:drawingSheet', async (_e, path, page) =>
+      drawing.readDrawingSheet(path, page),
+    );
+  }
 
   // The window is SHOWN, and throttling is off.
   //
@@ -104,24 +132,48 @@ async function main() {
   };
 
   // ---- Build a building --------------------------------------------------
-  step('the template screen offers a building', await run(CLICK, 'button', 'Create this building'));
-  await wait(900);
+  if (pdfPath) {
+    // The setup screen asks how to start before it offers the file picker.
+    step('the setup screen offers to attach a drawing', await run(CLICK, 'button', 'Attach an architectural drawing'));
+    await wait(600);
+    step('the file picker is offered', await run(CLICK, 'button', 'Attach a drawing'));
+    // A 56-sheet set takes about ten seconds to read.
+    await wait(30_000);
+    const read = await win.webContents.executeJavaScript(
+      `(document.querySelector('.card')?.textContent || '').trim()`,
+    );
+    console.log(`        ${read.replace(/\s+/g, ' ').slice(0, 150)}`);
+    await shot('import-review');
+    step('it uses the drawing as the building', await run(CLICK, 'button', 'Use this as the building'));
+    await wait(2500);
+  } else {
+    step('the template screen offers a building', await run(CLICK, 'button', 'Create this building'));
+    await wait(900);
+  }
 
   // ---- Drawings ----------------------------------------------------------
   step('the Drawings tab opens', await run(CLICK, 'nav button', 'Drawings'));
-  await wait(600);
-  await shot('drawings-empty');
-  const emptyText = await win.webContents.executeJavaScript(
-    `(document.querySelector('.list-empty')?.textContent || '').trim()`,
-  );
-  step('it says plainly that no drawing is attached', {
-    ok: /no drawing is attached/i.test(emptyText),
-    saw: emptyText.slice(0, 120),
-  });
+  await wait(pdfPath ? 25_000 : 600);
+  await shot(pdfPath ? 'drawings-sheet' : 'drawings-empty');
+  if (!pdfPath) {
+    const emptyText = await win.webContents.executeJavaScript(
+      `(document.querySelector('.list-empty')?.textContent || '').trim()`,
+    );
+    step('it says plainly that no drawing is attached', {
+      ok: /no drawing is attached/i.test(emptyText),
+      saw: emptyText.slice(0, 120),
+    });
+  } else {
+    const shown = await win.webContents.executeJavaScript(
+      `(document.querySelector('.overlay.bl')?.textContent || '').trim()`,
+    );
+    console.log(`        ${shown.replace(/\s+/g, ' ').slice(0, 160)}`);
+    step('it draws a sheet from the set', { ok: /line\(s\)/i.test(shown), saw: shown.slice(0, 120) });
+  }
 
   // ---- 2D plan -----------------------------------------------------------
   step('the 2D Plan tab opens', await run(CLICK, 'nav button', '2D Plan'));
-  await wait(700);
+  await wait(pdfPath ? 3000 : 700);
   await shot('plan-dark');
 
   step('the Paper contrast button is there', await run(CLICK, 'button', 'Paper'));
@@ -133,7 +185,10 @@ async function main() {
 
   // ---- 3D ----------------------------------------------------------------
   step('the 3D tab opens', await run(CLICK, 'nav button', '3D'));
-  await wait(1500);
+  // A nine-storey import is 3,000-odd walls to extrude, and under software
+  // rendering the first painted frame lags the DOM by seconds. Screenshotting
+  // too early captures the previous tab, which looks like a working screenshot.
+  await wait(pdfPath ? 9000 : 1500);
   await shot('model-orbit');
 
   const status = await win.webContents.executeJavaScript(
@@ -145,7 +200,7 @@ async function main() {
   });
 
   step('one floor at a time can be turned on', await run(CHECK, 'Only this floor', true));
-  await wait(700);
+  await wait(pdfPath ? 3000 : 700);
   await shot('model-one-floor');
 
   step('and turned off again', await run(CHECK, 'Only this floor', false));

@@ -544,6 +544,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       sprite.renderOrder = 10;
       // Fractions of the viewport, at the canvas's 3.2 : 1 aspect.
       sprite.scale.set(0.17, 0.053, 1);
+      sprite.userData.baseScale = [0.17, 0.053];
       return sprite;
     };
 
@@ -611,7 +612,10 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         isMain ? '#b8860b' : '#8e2f2c',
         '#ffffff',
       );
-      if (isMain) sign.scale.set(0.24, 0.075, 1);
+      if (isMain) {
+        sign.scale.set(0.24, 0.075, 1);
+        sign.userData.baseScale = [0.24, 0.075];
+      }
       sign.position.set(entrance.at.x * MM, base + 2.9, -entrance.at.y * MM);
       addEntranceSign(sign);
       nearHide.push({ object: sign, at: entrance.at });
@@ -761,7 +765,20 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       { x: modelBounds.maxX, y: modelBounds.maxY },
       { x: modelBounds.minX, y: modelBounds.maxY },
     ]);
-    const target = new THREE.Vector3(modelCentre.x * MM, 2, -modelCentre.y * MM);
+    // How tall the building is, which the orbit has to allow for.
+    //
+    // Framing on the footprint alone works for a bungalow and fails for a tower:
+    // a nine-storey import is 30 m tall on a 13 m plan, so a distance taken from
+    // the plan put the camera inside the stack with the top four floors off
+    // screen. The target rises to the middle of the building for the same
+    // reason.
+    const buildingHeightM =
+      floors.reduce((tallest, f) => Math.max(tallest, f.elevation + f.floorToFloor), 0) * MM;
+    const target = new THREE.Vector3(
+      modelCentre.x * MM,
+      Math.max(2, buildingHeightM / 2),
+      -modelCentre.y * MM,
+    );
     ground.position.x = target.x;
     ground.position.z = target.z;
     sun.target.position.copy(target);
@@ -778,7 +795,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
 
     let orbitAngle = Math.PI * 0.25;
     let orbitElevation = 0.55;
-    let orbitDistance = Math.max(spanX, spanY, 12) * 1.6;
+    let orbitDistance = Math.max(spanX, spanY, buildingHeightM, 12) * 1.6;
 
     const walkPos = new THREE.Vector3(target.x, EYE_HEIGHT_MM * MM, target.z + 3);
     let yaw = Math.PI;
@@ -988,7 +1005,27 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       }
     };
 
+    /**
+     * Signs are smaller when orbiting than when walking.
+     *
+     * They hold a constant size on screen, which is right for finding your way
+     * on foot and wrong when the whole building is in frame: at that distance
+     * ENTRANCE, STAIRS and LIFT all point at roughly the same spot and stack on
+     * top of one another. Orbiting, you can see where things are; the label only
+     * has to say which is which.
+     */
+    const scaleSigns = () => {
+      const k = modeRef.current === 'walk' ? 1 : 0.5;
+      for (const list of [...signsForLevel.values(), entranceSigns]) {
+        for (const object of list) {
+          const base = object.userData.baseScale as [number, number] | undefined;
+          if (base) object.scale.set(base[0] * k, base[1] * k, 1);
+        }
+      }
+    };
+
     const applyFloorVisibility = () => {
+      scaleSigns();
       const selected = floors[floorIndexRef.current];
       const only = isolateRef.current ? selected?.level : undefined;
 
@@ -1375,7 +1412,7 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
   const refreshRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     refreshRef.current?.();
-  }, [isolate, showSigns, floorIndex]);
+  }, [isolate, showSigns, floorIndex, mode]);
 
   const totalArea = useMemo(
     () => floors.reduce((sum, f) => sum + f.rooms.reduce((s, r) => s + polygonArea(r.boundary) / 92_903.04, 0), 0),

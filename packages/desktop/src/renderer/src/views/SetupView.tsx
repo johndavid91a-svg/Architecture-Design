@@ -67,7 +67,13 @@ function draft(name: string, use: RoomUse, width: string, depth: string): RoomDr
 }
 
 export function SetupView({ project, onCreated, onImported }: Props): JSX.Element {
-  const [name, setName] = useState('National Space Centre');
+  // Blank, not the worked design's name.
+  //
+  // Prefilling it meant a building imported from a drawing was called "National
+  // Space Centre" — the template's project name attached to somebody else's
+  // plaza. Blank lets the template supply its own name and lets an import take
+  // the file's.
+  const [name, setName] = useState('');
   const [buildingType, setBuildingType] = useState<BuildingType>('commercial_plaza');
   const [city, setCity] = useState('Islamabad');
   const [floorCount, setFloorCount] = useState(1);
@@ -272,7 +278,12 @@ export function SetupView({ project, onCreated, onImported }: Props): JSX.Elemen
         <div className="grid cols-4">
           <div>
             <label htmlFor="p-name">Project name</label>
-            <input id="p-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              id="p-name"
+              value={name}
+              placeholder="Named after the drawing, or the worked design"
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div>
             <label htmlFor="p-type">Building type</label>
