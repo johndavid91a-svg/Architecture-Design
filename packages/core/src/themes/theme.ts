@@ -391,14 +391,11 @@ export const THEMES: readonly Theme[] = [
           'corridor, which is the exact impression this theme exists to avoid.',
       },
     ],
-    // `lounge.recreation` currently claims the games and counter items only. It
-    // does not claim `seating.sofa.3`, `seating.lounge.chair` or
-    // `decor.planter.large`, so the furniture list handed to the AI omits the
-    // soft seating and the planting that the signature elements above ask for.
-    // Those three items need the style key adding in the furniture catalogue;
-    // until they have it the gap is here in writing rather than discovered in a
-    // render, because a style that matches nothing at all falls back to the
-    // whole catalogue and would quietly offer the AI office desks instead.
+    // `lounge.recreation` claims the games and counter items and also the soft
+    // seating, the planting and the screen, which the signature elements above
+    // ask for by name. Whatever this string is changed to must match at least
+    // one catalogue item: a style key that matches nothing does not fail, it
+    // falls back to the whole catalogue and quietly offers the AI office desks.
     furnitureStyle: 'lounge.recreation',
     avoid:
       'Grid ceilings, cool white light, pale porcelain floors, neon strip used as decoration, sports-bar ' +

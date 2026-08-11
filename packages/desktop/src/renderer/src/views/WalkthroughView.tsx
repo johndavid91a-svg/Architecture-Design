@@ -607,7 +607,18 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         // geometry, which is not worth the triangle count at this stage.
         const owningRoom = floor.rooms.find((r) => r.boundingWallIds.includes(wall.id));
         const rd = owningRoom ? designByRoom.get(owningRoom.id) : undefined;
-        const wallFinish = rd?.finishes.find((f) => f.surface === 'wall_internal' && !f.heightLimit);
+        // A finish naming THIS wall beats the room-wide one — that is what a
+        // feature wall IS. Taking the first `wall_internal` finish instead meant
+        // whichever material the design happened to list first won every wall,
+        // so a design carrying one deep accent wall rendered as plaster
+        // everywhere and the feature was dead in the 3D view while sitting
+        // correctly in the data.
+        const roomFinishes = rd?.finishes.filter(
+          (f) => f.surface === 'wall_internal' && !f.heightLimit,
+        );
+        const wallFinish =
+          roomFinishes?.find((f) => f.wallId === wall.id) ??
+          roomFinishes?.find((f) => !f.wallId);
         const wallMaterial = materialFor(
           wallFinish?.materialId,
           wall.function === 'exterior' ? 0xb9b3a8 : 0xd8d4cc,

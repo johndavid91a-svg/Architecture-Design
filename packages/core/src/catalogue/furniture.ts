@@ -148,7 +148,7 @@ export const FURNITURE: readonly FurnitureItem[] = [
     depth: 900,
     height: 800,
     clearanceFront: 600,
-    styles: ['contemporary.office', 'executive.timber'],
+    styles: ['contemporary.office', 'executive.timber', 'lounge.recreation', 'hospitality.warm'],
     placeholderColorHex: '#4a5260',
   },
   {
@@ -159,7 +159,7 @@ export const FURNITURE: readonly FurnitureItem[] = [
     depth: 800,
     height: 750,
     clearanceFront: 500,
-    styles: ['contemporary.office', 'executive.timber'],
+    styles: ['contemporary.office', 'executive.timber', 'lounge.recreation', 'hospitality.warm'],
     placeholderColorHex: '#55606e',
   },
   {
@@ -180,7 +180,7 @@ export const FURNITURE: readonly FurnitureItem[] = [
     width: 1680,
     depth: 80,
     height: 960,
-    styles: ['contemporary.office', 'technical.workstation'],
+    styles: ['contemporary.office', 'technical.workstation', 'lounge.recreation', 'hospitality.warm'],
     placeholderColorHex: '#14181d',
   },
   {
@@ -213,7 +213,17 @@ export const FURNITURE: readonly FurnitureItem[] = [
     width: 600,
     depth: 600,
     height: 1400,
-    styles: ['contemporary.office', 'executive.timber', 'technical.workstation'],
+    // Also claimed by the recreation styles. The soft seating, the planting and
+    // the screen are older than the games items but a recreation lounge places
+    // all of them, and a style key that reaches the pool table but not the sofa
+    // hands the AI a room with nothing to sit on.
+    styles: [
+      'contemporary.office',
+      'executive.timber',
+      'technical.workstation',
+      'lounge.recreation',
+      'hospitality.warm',
+    ],
     placeholderColorHex: '#3f5c3a',
   },
   {

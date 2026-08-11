@@ -179,6 +179,54 @@ const TEXTURES: Record<string, TextureSpec> = {
     },
   },
   mat_block_concrete: { moduleMm: 1600, draw: speckle(0.6, 0.07) },
+  // Glass and metal: the last two catalogue materials carrying an appearance
+  // but no pattern, so both fell to the default speckle and a glazed screen and
+  // an aluminium mullion came out as the same lightly dusty plane at different
+  // hues. Neither is a texture in the ordinary sense — what separates them is
+  // that glass has almost no grain and metal has nothing BUT grain, all of it
+  // running one way.
+  mat_glass_glazing: {
+    // A pane, not a pattern. The joint is the only thing on a glazed screen that
+    // gives it a size at all, so the module is the pane width.
+    moduleMm: 1500,
+    draw: (ctx, size, base) => {
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, size, size);
+      // A soft diagonal band: what a sheet of glass shows of the room behind the
+      // camera. Without it the pane is a flat blue wall, which is worse than the
+      // speckle it replaces.
+      const sheen = ctx.createLinearGradient(0, size, size, 0);
+      sheen.addColorStop(0, shade(base, -0.04));
+      sheen.addColorStop(0.45, shade(base, 0.09));
+      sheen.addColorStop(0.6, shade(base, -0.02));
+      sheen.addColorStop(1, shade(base, 0.05));
+      ctx.fillStyle = sheen;
+      ctx.fillRect(0, 0, size, size);
+      // The edge of the pane, dark against it: a mullion every module.
+      ctx.strokeStyle = shade(base, -0.22);
+      ctx.lineWidth = Math.max(1.5, size / 90);
+      ctx.strokeRect(0, 0, size, size);
+    },
+  },
+  mat_aluminium_section: {
+    // Brushing is far finer than any tile, so the module is small. The lines run
+    // one way only: metal that sparkles in both directions reads as granite.
+    moduleMm: 400,
+    draw: (ctx, size, base) => {
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, size, size);
+      const random = noise(43);
+      for (let i = 0; i < 260; i++) {
+        ctx.strokeStyle = shade(base, (random() - 0.5) * 0.14);
+        ctx.lineWidth = 0.5 + random() * 1.1;
+        const y = random() * size;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(size, y);
+        ctx.stroke();
+      }
+    },
+  },
 };
 
 /** The pattern used when a material names none: enough grain to catch the light. */
@@ -218,6 +266,17 @@ export function textureFor(
   if (!ctx) return null;
   spec.draw(ctx, SIZE, baseColourHex);
   const texture = new THREE.CanvasTexture(canvas);
+  // The canvas is painted with sRGB hex strings, so it must be DECLARED sRGB.
+  //
+  // Without this three treats the bytes as linear and the renderer encodes them
+  // to sRGB on the way out, so every textured surface comes back at roughly the
+  // square root of its real value — nearly twice as bright. #4a4a4e granite
+  // (74) rendered at 147: a dark stone floor arriving as light grey. It looked
+  // like a lighting problem and survived two rounds of tuning the lights, which
+  // is exactly what a colour-space bug does. The control is flat-coloured
+  // furniture: it uses THREE.Color, which is converted correctly, and it always
+  // landed on its catalogue value.
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.anisotropy = 4;
