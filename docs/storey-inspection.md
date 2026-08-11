@@ -100,6 +100,24 @@ with a level at EL. -15'-0" below the basement.
 **The lift pit is not in the model.** It is below the basement slab and nothing
 built so far reaches it.
 
+## The rear elevation, and a wall that should not be solid
+
+Page 49, **REAR ELEVATION**, states the same ten levels a fourth time and agrees
+again. It also describes the rear facade, which the model does not have:
+
+    4'-0"  7'-9"  4'-0"  7'-9"  4'-0"  7'-9"  4'-0" …    piers and openings
+    2'-10"  8'-11"  2'-10"  8'-11" …                     sills and heads
+
+**THE MODEL'S REAR WALL IS SOLID.** Every storey's north elevation is drawn here
+with 7'-9" openings between 4'-0" piers, and the model has no opening in that
+wall at any level. The front was composed from the plan — core strip, balcony
+bay, glazing — and the back was never looked at.
+
+The bay rhythm is legible but the model has not been changed for it: turning a
+string of dimensions into an elevation means knowing which figure is a pier and
+which is a reveal, and that is a reading of the sheet rather than an inference
+from it. Recorded as a defect, not patched over.
+
 ## Still open, and not guessable from here
 
 - **The mumty's door positions.** On the sheet, unread.
@@ -112,6 +130,8 @@ built so far reaches it.
   means driving the app's designer channel, which `ui-journey.mjs` does; the two
   do not share it yet.
 - **The lift pit at EL. -15'-0"**, named on section A-A and not modelled.
-- **Sections B-B to D-D, the rear elevation and the structural grid sheets** are
-  read but unused. A-A has now been used and confirmed every level; the others
-  would confirm beam depths and column positions.
+- **The rear elevation's openings.** 7'-9" wide between 4'-0" piers, on every
+  storey, and the model's rear wall is solid at all of them.
+- **Sections B-B to D-D and the structural grid sheets** are read but unused.
+  A-A and the rear elevation have now been used; between them and the front
+  elevation, three independent sheets confirm all ten levels.
