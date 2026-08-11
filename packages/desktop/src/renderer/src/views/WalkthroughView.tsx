@@ -26,6 +26,17 @@ interface Props {
   readonly project: Project;
   readonly floors: readonly Floor[];
   readonly design: Design | undefined;
+  /**
+   * Every design option the project holds, so the walkthrough can switch
+   * between them without going back to the Design tab.
+   *
+   * Comparing two schemes is done by LOOKING at them, and looking means
+   * standing in the room. Having to leave the 3D view, change the active
+   * option, and come back — losing the camera each time — is the difference
+   * between comparing three concepts and giving up after the first.
+   */
+  readonly designs?: readonly Design[];
+  readonly onSelectDesign?: (id: Design['id']) => void;
 }
 
 type Mode = 'orbit' | 'walk';
@@ -140,7 +151,7 @@ interface Ride {
  * millimetres puts the camera 4,572 units from a wall and shadow bias, fog and
  * attenuation all stop behaving. The conversion happens here and nowhere else.
  */
-export function WalkthroughView({ project, floors, design }: Props): JSX.Element {
+export function WalkthroughView({ project, floors, design, designs, onSelectDesign }: Props): JSX.Element {
   const mountRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>('orbit');
   const [floorIndex, setFloorIndex] = useState(0);
@@ -212,6 +223,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     light: null,
     ambient: null,
   });
+  /** Camera state that outlives a scene rebuild. See the note where it is read. */
+  const cameraRef = useRef<{
+    orbitAngle: number;
+    orbitElevation: number;
+    orbitDistance: number;
+    walk: { x: number; y: number; z: number };
+    yaw: number;
+    pitch: number;
+  } | null>(null);
   const timeRef = useRef({ hour, month, day });
   timeRef.current = { hour, month, day };
 
@@ -1094,13 +1114,23 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     sun.shadow.camera.far = siteSpan * 8;
     sun.shadow.camera.updateProjectionMatrix();
 
-    let orbitAngle = Math.PI * 0.25;
-    let orbitElevation = 0.55;
-    let orbitDistance = Math.max(spanX, spanY, buildingHeightM, 12) * 1.6;
+    // ---- Where you were standing, across a rebuild --------------------------
+    //
+    // Switching scheme rebuilds the whole scene, and without this the camera
+    // snapped back to the default orbit every time — which defeats the point of
+    // the switch. Comparing two designs means looking at the SAME thing twice,
+    // so the eye has somewhere to put the difference; reset the view between
+    // them and you are comparing two photographs taken from different places.
+    const kept = cameraRef.current;
+    let orbitAngle = kept?.orbitAngle ?? Math.PI * 0.25;
+    let orbitElevation = kept?.orbitElevation ?? 0.55;
+    let orbitDistance = kept?.orbitDistance ?? Math.max(spanX, spanY, buildingHeightM, 12) * 1.6;
 
-    const walkPos = new THREE.Vector3(target.x, EYE_HEIGHT_MM * MM, target.z + 3);
-    let yaw = Math.PI;
-    let pitch = 0;
+    const walkPos = kept
+      ? new THREE.Vector3(kept.walk.x, kept.walk.y, kept.walk.z)
+      : new THREE.Vector3(target.x, EYE_HEIGHT_MM * MM, target.z + 3);
+    let yaw = kept?.yaw ?? Math.PI;
+    let pitch = kept?.pitch ?? 0;
     const keys = new Set<string>();
 
     const applyOrbit = () => {
@@ -1683,6 +1713,14 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     applyFloorVisibility();
 
     return () => {
+      cameraRef.current = {
+        orbitAngle,
+        orbitElevation,
+        orbitDistance,
+        walk: { x: walkPos.x, y: walkPos.y, z: walkPos.z },
+        yaw,
+        pitch,
+      };
       cacheFrame('model');
       registerCanvas('model', null);
       visibilityRef.current = null;
@@ -1744,6 +1782,27 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             Walk
           </button>
         </div>
+
+        {designs && designs.length > 1 && onSelectDesign && (
+          <>
+            <label>Scheme — switch and compare</label>
+            <select
+              value={design?.id ?? ''}
+              onChange={(e) => onSelectDesign(e.target.value as Design['id'])}
+              style={{ marginBottom: 8 }}
+            >
+              {designs.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label ?? d.name}
+                </option>
+              ))}
+            </select>
+            <div className="small muted" style={{ marginBottom: 8 }}>
+              {designs.length} option(s). The camera stays where it is, so you can
+              stand in one spot and switch.
+            </div>
+          </>
+        )}
 
         {floors.length > 1 && (
           <>

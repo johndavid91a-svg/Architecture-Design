@@ -433,8 +433,141 @@ export const ROOF_BUDGET = (() => {
   };
 })();
 
+/**
+ * The ground floor, at +2'-6" above road level.
+ *
+ * The hall is the same 30'-2" x 42'-10" as every floor above, but a large part
+ * of it is DOUBLE HEIGHT — the mezzanine sheet marks "LOOK BELOW" over it, and
+ * the level tags make the void 18'-9" tall, from +2'-6" up to the first floor at
+ * +21'-3". That double height is the lobby in all three ground-floor concepts.
+ */
+export function groundFloor() {
+  const rooms = [
+    ...CORE.map(([name, use, x, y, w, d]) => ({
+      name,
+      use,
+      boundary: rect(x, y, w, d),
+      clearHeight: CLEAR,
+      confidence: 'extracted',
+      note: DRAWN,
+    })),
+    {
+      name: 'LOBBY',
+      use: 'lobby',
+      // "LOBBY 10'-0" WIDE" is the only figure the sheet gives it — a width and
+      // no depth — so it is taken as the strip inside the entrance, its length
+      // set by the hall it opens off.
+      boundary: rect(CORE_W, 30, 10, 14.5),
+      clearHeight: Math.round(18.75 * FT),
+      confidence: 'inferred',
+      note: 'The sheet states its WIDTH only (10\'-0"). The depth is taken from the hall it opens off.',
+    },
+    {
+      name: 'HALL',
+      use: 'lobby',
+      boundary: hallBoundary(),
+      clearHeight: Math.round(18.75 * FT),
+      confidence: 'extracted',
+      note: '30\'-2" x 42\'-10", double height under the mezzanine void: +2\'-6" to +21\'-3".',
+    },
+    {
+      name: 'BALCONY',
+      use: 'balcony',
+      boundary: rect(BALCONY.x, BALCONY.y, BALCONY.w, BALCONY.d),
+      clearHeight: CLEAR,
+      confidence: 'inferred',
+      note: 'Labelled, not dimensioned. Measured off the line work.',
+    },
+  ];
+  return {
+    name: 'Ground',
+    level: 0,
+    elevation: Math.round(2.5 * FT),
+    floorToFloor: Math.round(9.75 * FT), // +2'-6" to +12'-3"
+    clearHeight: Math.round(18.75 * FT),
+    confidence: 'extracted',
+    purpose: 'Reception, Lounge, Conference, Tuck Shop',
+    rooms: rooms.filter((r) => r.name !== 'BATH').concat([{
+      name: 'BATH',
+      use: 'toilet',
+      boundary: rect(0.5, 8, 5, 5 + 5.5 / 12),
+      clearHeight: CLEAR,
+      confidence: 'extracted',
+      note: DRAWN,
+    }]),
+    walls: [
+      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
+      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
+      // The entrance, on the front (south) elevation.
+      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [door(24, 8)]),
+      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
+      wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
+      wall(CORE_W, 18.5, CORE_W, 45, EXTERIOR_MM, 'interior', [door(21.5, 3.5)]),
+    ],
+  };
+}
+
+/**
+ * The mezzanine, at +12'-3", and it is NOT L-shaped.
+ *
+ * The concept boards draw it wrapping two sides of the lobby. The sheet writes
+ * "MEZZANINE 29'-1" x 13'-8"" — one rectangle, 397 sq ft, spanning nearly the
+ * hall's full 30'-2" width and only 13'-8" of its 42'-10" depth. The rest of the
+ * hall below is marked LOOK BELOW twice: it is the void, not more floor.
+ *
+ * This is why the schedule and the drawing disagree by so much on this storey.
+ * The SCHEDULE OF COV. AREA counts 1,717.34 for the mezzanine like every other
+ * floor, because covered area counts the void; the drawing's own rooms come to
+ * 592. Both are right about different things, and the 592 is the one you can
+ * stand on.
+ */
+export function mezzanineFloor() {
+  const MEZZ = { x: CORE_W, y: 2 + 2 / 12, w: 29 + 1 / 12, d: 13 + 8 / 12 };
+  const rooms = [
+    ['PA ROOM', 'office', 0.5, 0.5, 8 + 10 / 12, 7],
+    ['EMG. STAIRS', 'stair', CORE_W, 0.5, 4 + 3 / 12, 7],
+    ['BATH', 'toilet', 0.5, 8, 5, 5 + 5.5 / 12],
+    ['LANDING', 'circulation', 0.5, 14.5, 8 + 10 / 12, 8],
+    ['LIFT', 'lift', 0.5, 35.5, 7.5, 6 + 4 / 12],
+  ].map(([name, use, x, y, w, d]) => ({
+    name,
+    use,
+    boundary: rect(x, y, w, d),
+    clearHeight: Math.round(9 * FT),
+    confidence: 'extracted',
+    note: DRAWN,
+  }));
+  rooms.push({
+    name: 'MEZZANINE',
+    use: 'open_office',
+    boundary: rect(MEZZ.x, MEZZ.y, MEZZ.w, MEZZ.d),
+    clearHeight: Math.round(9 * FT),
+    confidence: 'extracted',
+    note: '29\'-1" x 13\'-8" from the sheet. ONE RECTANGLE — the concept boards show an L, the drawing does not.',
+  });
+  return {
+    name: 'Mezzanine',
+    level: 0.5,
+    elevation: Math.round(12.25 * FT),
+    floorToFloor: Math.round(9 * FT), // +12'-3" to +21'-3"
+    clearHeight: Math.round(9 * FT),
+    confidence: 'extracted',
+    purpose: 'PA Room, Meeting Lounge, Open Work / Display',
+    rooms,
+    walls: [
+      wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
+      wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
+      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior'),
+      wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
+      wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
+      // The mezzanine's open edge onto the void. A guard, not a wall.
+      wall(CORE_W, MEZZ.y + MEZZ.d, CORE_W + MEZZ.w, MEZZ.y + MEZZ.d, PARTITION_MM, 'partition', [], false),
+    ],
+  };
+}
+
 export function towerFloors() {
-  return [storey(1), storey(2), storey(3), storey(4), mumtyFloor()];
+  return [groundFloor(), mezzanineFloor(), storey(1), storey(2), storey(3), storey(4), mumtyFloor()];
 }
 
 /**

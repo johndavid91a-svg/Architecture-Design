@@ -136,7 +136,13 @@ export function App(): JSX.Element {
         {tab === 'drawings' && <DrawingsView path={drawingPath} />}
         {tab === 'plan' && <PlanView store={store} />}
         {tab === 'walk' && store.project && (
-          <WalkthroughView project={store.project} floors={store.floors} design={store.design} />
+          <WalkthroughView
+            project={store.project}
+            floors={store.floors}
+            design={store.design}
+            designs={store.project.designs}
+            onSelectDesign={store.setActiveDesign}
+          />
         )}
         {tab === 'design' && <DesignView store={store} />}
         {tab === 'options' && (

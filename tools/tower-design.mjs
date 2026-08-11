@@ -49,6 +49,7 @@ const at = (xFt, yFtSouth) => ({
 const CATALOGUE = {
   'desk.workstation.1600': { width: 1600, depth: 800, height: 750, clearanceFront: 900 },
   'desk.executive.1800': { width: 1800, depth: 900, height: 750, clearanceFront: 1000 },
+  'reception.desk.2400': { width: 2400, depth: 900, height: 1100, clearanceFront: 1200 },
   'chair.task': { width: 620, depth: 620, height: 1150 },
   'chair.executive': { width: 700, depth: 720, height: 1250 },
   'table.conference.8': { width: 2400, depth: 1200, height: 750, clearanceFront: 1200 },
@@ -584,6 +585,122 @@ function boardroom() {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// The three ground-floor concepts
+// ---------------------------------------------------------------------------
+//
+// Same architecture, same furniture positions, three material and lighting
+// schemes. That is deliberate and it is the whole point of comparing them: if
+// the layout moved as well, you would be judging two things at once and could
+// not say which one you were reacting to.
+//
+// Every material id is real. Where a board's palette names something the
+// catalogue has no line for — brushed metal, gold, leather, walnut — the nearest
+// honest material is used and the substitution is named in the rationale, never
+// silently swapped for something that would price as a different trade.
+
+export const GROUND_CONCEPTS = {
+  lounge: {
+    label: 'Concept 1 — Modern Geo-Spatial Lounge',
+    tagline: 'Earth. Data. Insight.',
+    floor: FLOOR_EXEC,
+    floorNote: 'Dark marble. The board calls it dark stone; marble is the catalogue’s stone line.',
+    wall: WALL_WARM,
+    feature: WALL_FEATURE,
+    featureNote: 'The LED earth wall, clad. The screen itself is furniture, not a finish.',
+    ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
+    kelvin: 3000,
+    lighting: [
+      ['cove', 12, 18, 'Warm cove round the void, which is what the board is mostly showing.'],
+      ['linear_led', 8, 20, 'Vertical slats washed from below.'],
+      ['pendant', 2, 40, 'Over the reception desk.'],
+    ],
+    missing: 'Walnut and the vertical timber slats have no catalogue line. Plaster stands in for both, so the timber is described and NOT costed.',
+  },
+  hub: {
+    label: 'Concept 2 — Futuristic GIS Hub',
+    tagline: 'Mapping Tomorrow',
+    floor: FLOOR_EXEC,
+    floorNote: 'White marble, polished — the palette is light and this is the lightest floor the catalogue has.',
+    wall: WALL_CALM,
+    feature: 'mat_acp_panel',
+    featureNote: 'Panelled: the board’s brushed metal, and the closest real material to it.',
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    kelvin: 4000,
+    lighting: [
+      ['linear_led', 16, 20, 'Recessed lines, cool, and a lot of them: this scheme is lit like a product.'],
+      ['cove', 6, 16, 'Slot round the reception and the void edge.'],
+      ['wall_washer', 4, 12, 'On the data wall.'],
+    ],
+    missing: 'Concrete and glass-light are described and not costed — no catalogue line for either as a finish.',
+  },
+  observatory: {
+    label: 'Concept 3 — Luxury Earth Observation Centre',
+    tagline: 'Observe. Analyze. Empower.',
+    floor: FLOOR_EXEC,
+    floorNote: 'Black marble.',
+    wall: WALL_WARM,
+    feature: WALL_FEATURE,
+    featureNote: 'The globe wall, clad, and lit from behind rather than in front.',
+    ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
+    kelvin: 2700,
+    lighting: [
+      ['cove', 14, 18, 'The warmest of the three at 2700 K, and the darkest: this scheme is lit by pools, not evenly.'],
+      ['track', 8, 10, 'Aimed at the globe and the imagery wall.'],
+      ['wall_washer', 4, 12, 'Grazing the dark timber.'],
+      ['pendant', 2, 30, 'Over the seating.'],
+    ],
+    missing: 'GOLD METAL AND BROWN LEATHER HAVE NO CATALOGUE LINE, and they are most of what makes this scheme what it is. Both are described and not costed. Pricing this concept without them would understate it badly.',
+  },
+};
+
+/** The ground floor, in one of the three concepts. */
+function groundLobby(concept) {
+  const c = GROUND_CONCEPTS[concept];
+  const lamp = (kind, count, watts, note) => ({
+    kind,
+    count,
+    wattsEach: watts,
+    colourTemperatureK: c.kelvin,
+    note,
+  });
+  return {
+    name: 'HALL',
+    finishes: [
+      floor(c.floor, c.floorNote),
+      wall(c.wall),
+      featureWall(c.feature, 'north', c.featureNote),
+      skirting(),
+    ],
+    ceiling: c.ceiling,
+    lighting: c.lighting.map(([k, n, w, note]) => lamp(k, n, w, note)),
+    furniture: [
+      { key: 'reception.desk.2400', label: 'Reception desk', position: at(25, 12), rotationDeg: 0 },
+      { key: 'chair.task', label: 'Receptionist', position: at(25, 12 - tuck(900, 620)), rotationDeg: 180 },
+      { key: 'display.videowall.3x2', label: 'Earth / data wall', position: at(25, 2.9), rotationDeg: 0 },
+      // Sofas facing each other across the table, which is how the boards draw
+      // it: 2,100 wide turned end-on, table between them.
+      { key: 'seating.sofa.3', label: 'Waiting sofa 1', position: at(25, 23.4), rotationDeg: 180 },
+      { key: 'seating.sofa.3', label: 'Waiting sofa 2', position: at(25, 28.6), rotationDeg: 0 },
+      { key: 'table.coffee.1200', label: 'Waiting table', position: at(25, 26), rotationDeg: 0 },
+      { key: 'exhibit.plinth.1200', label: 'Satellite model', position: at(35, 20), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(11.5, 8), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(11.5, 12), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(38.5, 8), rotationDeg: 0 },
+    ],
+    rationale:
+      `${c.label} — "${c.tagline}". THE DOUBLE HEIGHT IS THE SCHEME. This hall runs from +2'-6" to ` +
+      `+21'-3", 18'-9" clear under the mezzanine void, and every one of the three boards is really a ` +
+      `picture of that volume. The reception faces the door with the data wall behind it; the ` +
+      `waiting group sits under the void where the height is; the satellite model stands at the east ` +
+      `wall where the mezzanine looks down on it.\n` +
+      `The layout is IDENTICAL in all three concepts, on purpose. Only the materials and the light ` +
+      `change, so that switching between them in the 3D view compares one thing and not two.\n` +
+      `WHAT THE CATALOGUE CANNOT SAY: ${c.missing}`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The roof
 // ---------------------------------------------------------------------------
@@ -748,7 +865,9 @@ function boundingWallOnSide(room, floorData, side) {
 }
 
 /** What each storey holds, by level. */
-function specsForLevel(level) {
+function specsForLevel(level, concept = 'lounge') {
+  if (level === 0) return [...coreRooms({ kitchenIsPlant: false }), groundLobby(concept)];
+  if (level === 0.5) return [mezzanineSpec()];
   const hall = { 1: gisHall, 2: satelliteHall, 3: dataCentreHall, 4: executiveHall }[level];
   if (!hall) return skyGarden();
   const core = coreRooms({ kitchenIsPlant: level === 3 });
@@ -768,6 +887,43 @@ function specsForLevel(level) {
  * `floors` must already carry room ids and recomputed `boundingWallIds`: a
  * feature wall is resolved to a real `WallId` here.
  */
+/** The mezzanine, which is one rectangle and not the L the boards draw. */
+function mezzanineSpec() {
+  return {
+    name: 'MEZZANINE',
+    finishes: [
+      floor(FLOOR_SOFT, 'Carpet: it overlooks a hard double-height hall and needs the acoustics.'),
+      wall(WALL_WARM),
+      featureWall(WALL_FEATURE, 'north', 'The wall behind the meeting lounge.'),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    lighting: [
+      warmLight('recessed_downlight', 10, 12, 'Even, over the open work area.'),
+      warmLight('cove', 4, 16, 'Along the guard, so the edge of the void reads at night.'),
+    ],
+    furniture: [
+      { key: 'table.conference.8', label: 'Meeting table', position: at(16, 8), rotationDeg: 0 },
+      ...Array.from({ length: 4 }, (_, i) => ({
+        key: 'chair.executive',
+        label: `Meeting chair ${i + 1}`,
+        position: at(14.5 + (i % 2) * 3, 8 + (i < 2 ? -AT_BOARD : AT_BOARD)),
+        rotationDeg: i < 2 ? 0 : 180,
+      })),
+      { key: 'desk.workstation.1600', label: 'Display desk', position: at(30, 6), rotationDeg: 0 },
+      { key: 'chair.task', label: 'Display chair', position: at(30, 9), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(37, 5), rotationDeg: 0 },
+    ],
+    rationale:
+      'ONE RECTANGLE, 29\'-1" x 13\'-8", because that is what the sheet says. The concept boards ' +
+      'draw it wrapping two sides of the lobby in an L; the drawing has it as a single band across ' +
+      'the north end with the rest of the hall below marked LOOK BELOW twice. It is 397 sq ft of ' +
+      'floor, not 700-odd.\n' +
+      'Meeting lounge at the west end where the stair arrives, open work and display at the east, ' +
+      'and the guard edge lit so the void reads at night. Carpet, because it overlooks a hard hall.',
+  };
+}
+
 export function towerDesign(floors, options = {}) {
   const rooms = [];
   const byFloor = [];
@@ -777,7 +933,7 @@ export function towerDesign(floors, options = {}) {
     const floorRooms = [];
     const level = floorData.level;
     // The mumty carries the roof garden; every other storey is an office floor.
-    const specs = specsForLevel(level <= 4 ? level : 5);
+    const specs = specsForLevel(level <= 4 ? level : 5, options.concept ?? 'lounge');
 
     for (const spec of specs) {
       const room = floorData.rooms.find((r) => r.name === spec.name);
