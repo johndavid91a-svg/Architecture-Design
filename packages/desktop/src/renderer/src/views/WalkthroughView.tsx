@@ -19,6 +19,8 @@ import {
   type TransportPoint,
 } from '@adp/core';
 import { cacheFrame, registerCanvas } from '../state/view-capture.js';
+import { buildFurniture } from '../three/furniture.js';
+import { disposeTextures, moduleMmFor, textureFor, tileUVs } from '../three/textures.js';
 
 interface Props {
   readonly project: Project;
@@ -59,6 +61,34 @@ const COLLISION_RADIUS_MM = 300;
  */
 const MIN_OBSTACLE_MM = 700;
 const MM = 0.001; // millimetres to scene metres
+
+/**
+ * `ShapeGeometry` writes the vertex position into the UV, and these shapes are
+ * built in metres — so UV 0..1 covers exactly one metre on every floor slab and
+ * ceiling, whatever size the room is.
+ */
+const SHAPE_UV_SPAN_MM = 1000;
+
+/** Skirting: 100 mm tall, standing 18 mm proud of the plaster. */
+const SKIRTING_HEIGHT_MM = 100;
+const SKIRTING_PROUD_MM = 18;
+/** Architrave: a 75 mm band round an opening, 25 mm proud. */
+const ARCHITRAVE_WIDTH_MM = 75;
+const ARCHITRAVE_PROUD_MM = 25;
+
+/**
+ * How many rooms get a real light.
+ *
+ * Three recompiles the shader for each distinct light count and every extra
+ * point light is evaluated per fragment, so a nine-storey import with a lamp in
+ * all fifty-six rooms drops the frame rate through the floor for lights you
+ * cannot see from inside any one room. The biggest rooms get the real lights;
+ * every room gets an emissive luminaire, which costs nothing and is most of what
+ * makes a ceiling read as lit.
+ */
+const MAX_ROOM_LIGHTS = 28;
+/** Rooms smaller than this get a luminaire but no lamp — a cupboard needs none. */
+const LIT_ROOM_MIN_AREA_MM2 = 4 * 1_000_000;
 
 /**
  * Lift timings, in seconds.
@@ -214,6 +244,16 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Tone mapping, because an interior has a range no clamp survives.
+    //
+    // Linear output clips: a lamp two metres away blows to pure white while the
+    // far corner of the same room stays crushed to flat grey, and every surface
+    // in between returns the same value. Filmic tone mapping rolls the highlight
+    // off instead of clipping it, which is what lets a lit ceiling and a shaded
+    // wall appear in one frame and still be told apart.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
     registerCanvas('model', renderer.domElement);
 
@@ -228,6 +268,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
     sunRef.current = { light: sun, ambient };
 
     // ---- Materials from the design layer ---------------------------------
+    //
+    // Every surface used to be a flat colour, so marble, carpet, tile and
+    // plaster were four matte planes at four hues and the room read as a
+    // cardboard model. What tells them apart is the module — the 600 mm tile,
+    // the 500 mm carpet square, the grain — so each material now carries a
+    // texture drawn at its real size against the real surface.
+    // One material per finish and side, shared by every surface that wears it.
+    // How big the pattern comes out is decided on each surface's own UVs, by
+    // `tileUVs` at the point the geometry is built.
     const materialCache = new Map<string, THREE.MeshStandardMaterial>();
     const materialFor = (
       materialId: string | undefined,
@@ -240,8 +289,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
 
       const spec = materialId ? findMaterial(materialId as never) : undefined;
       const appearance = spec?.appearance;
+      const colour = appearance
+        ? new THREE.Color(appearance.baseColorHex)
+        : new THREE.Color(fallbackHex);
+      const map = textureFor(materialId, `#${colour.getHexString()}`);
       const material = new THREE.MeshStandardMaterial({
-        color: appearance ? new THREE.Color(appearance.baseColorHex) : new THREE.Color(fallbackHex),
+        // The canvas is already painted in the material's own colour, so tinting
+        // it again would square the colour and turn every finish muddy.
+        color: map ? 0xffffff : colour,
+        map,
         roughness: appearance?.roughness ?? 0.9,
         metalness: appearance?.metalness ?? 0,
         side,
@@ -259,6 +315,19 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
 
     const ceilingMeshes: THREE.Mesh[] = [];
     const furnitureMeshes: THREE.Object3D[] = [];
+    /**
+     * Rooms that would like a real lamp, biggest first, capped later.
+     *
+     * Collected rather than lit on the spot because the cap is a property of the
+     * whole building: which twenty-eight rooms deserve the lights cannot be known
+     * until every floor has been read.
+     */
+    const lightCandidates: Array<{
+      group: THREE.Group;
+      at: THREE.Vector3;
+      areaMm2: number;
+      reachM: number;
+    }> = [];
     const wallSegments: Array<{
       level: number;
       a: THREE.Vector2;
@@ -274,7 +343,9 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
       transparent: true,
       opacity: 0.32,
     });
-    const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 0.6 });
+    const doorMaterial = materialFor('mat_door_flush', 0x8a6242);
+    /** Painted joinery: architraves, window sills. Semi-gloss, as trim is. */
+    const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xf3efe6, roughness: 0.35 });
 
     // One group per storey. Everything a floor owns goes in its own group so a
     // floor can be moved, faded or hidden as a unit — which is what makes the
@@ -305,10 +376,14 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         shape.closePath();
 
         const floorFinish = rd?.finishes.find((f) => f.surface === 'floor');
-        const slab = new THREE.Mesh(
-          new THREE.ShapeGeometry(shape),
-          materialFor(floorFinish?.materialId, 0x9aa3ad),
+        const slabGeometry = new THREE.ShapeGeometry(shape);
+        tileUVs(
+          slabGeometry,
+          SHAPE_UV_SPAN_MM,
+          SHAPE_UV_SPAN_MM,
+          moduleMmFor(floorFinish?.materialId),
         );
+        const slab = new THREE.Mesh(slabGeometry, materialFor(floorFinish?.materialId, 0x9aa3ad));
         slab.rotation.x = -Math.PI / 2;
         slab.position.y = elevation + 0.01;
         slab.receiveShadow = true;
@@ -317,8 +392,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         const ceilingDrop = (rd?.ceiling.dropHeight ?? 0) * MM;
         // Same rotation as the slab, so it lands in the same place; BackSide so
         // it is visible from inside the room and invisible from above.
+        const ceilingGeometry = new THREE.ShapeGeometry(shape);
+        tileUVs(
+          ceilingGeometry,
+          SHAPE_UV_SPAN_MM,
+          SHAPE_UV_SPAN_MM,
+          moduleMmFor(rd?.ceiling.materialId),
+        );
         const ceiling = new THREE.Mesh(
-          new THREE.ShapeGeometry(shape),
+          ceilingGeometry,
           materialFor(rd?.ceiling.materialId, 0xf2f0ec, THREE.BackSide),
         );
         ceiling.rotation.x = -Math.PI / 2;
@@ -326,6 +408,117 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         ceiling.receiveShadow = true;
         ceilingMeshes.push(ceiling);
         floorGroup.add(ceiling);
+
+        // ---- The thing that stops the sun ---------------------------------
+        //
+        // A ceiling has to BLOCK the sun, not merely receive it, and the
+        // directional light was passing straight down through every slab: the
+        // inside of a basement was lit as brightly as the pavement above it, so
+        // every interior surface clipped to white and the lamps below made no
+        // visible difference at all.
+        //
+        // It cannot be the ceiling mesh itself, because "Show ceilings" is off by
+        // default — and a hidden object casts no shadow, so the toggle would
+        // silently decide whether the building has a roof. This twin is never
+        // drawn (it writes neither colour nor depth) and never hidden, so the
+        // toggle goes back to meaning what it says: whether you can see in.
+        const sunCap = new THREE.Mesh(
+          ceiling.geometry,
+          new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }),
+        );
+        sunCap.rotation.copy(ceiling.rotation);
+        sunCap.position.copy(ceiling.position);
+        sunCap.castShadow = true;
+        floorGroup.add(sunCap);
+
+        // ---- Lighting the inside -----------------------------------------
+        //
+        // The sun cannot reach a basement, and it cannot reach the middle of any
+        // deep floor plate either. With only sun and hemisphere ambient, every
+        // interior surface returned very nearly the same value: no falloff, no
+        // pool of light under a fitting, nothing to tell a 4 m room from a 20 m
+        // one. That is the single biggest reason the interiors read as diagrams
+        // rather than as rooms.
+        const rb = boundsOf(room.boundary);
+        const roomW = rb.maxX - rb.minX;
+        const roomD = rb.maxY - rb.minY;
+        const areaMm2 = polygonArea(room.boundary);
+        const ceilingY = elevation + room.clearHeight * MM - ceilingDrop;
+
+        // Luminaires on a grid, as a real ceiling has — one panel in a small
+        // room, a run of them down a hall. They are emissive rather than lights:
+        // free to draw, and a lit fitting you can see is most of what says the
+        // ceiling is lit.
+        const luminaire = new THREE.MeshBasicMaterial({ color: 0xfff6e2 });
+        const spacingMm = 3600;
+        const cols = Math.max(1, Math.min(4, Math.round(roomW / spacingMm)));
+        const rows = Math.max(1, Math.min(4, Math.round(roomD / spacingMm)));
+        const panelW = Math.min(1200, (roomW / cols) * 0.35);
+        const panelD = Math.min(600, (roomD / rows) * 0.35);
+        if (panelW > 150 && panelD > 100) {
+          for (let cx = 0; cx < cols; cx++) {
+            for (let cz = 0; cz < rows; cz++) {
+              const panel = new THREE.Mesh(
+                new THREE.PlaneGeometry(panelW * MM, panelD * MM),
+                luminaire,
+              );
+              panel.rotation.x = Math.PI / 2;
+              panel.position.set(
+                (rb.minX + ((cx + 0.5) * roomW) / cols) * MM,
+                ceilingY - 0.02,
+                -(rb.minY + ((cz + 0.5) * roomD) / rows) * MM,
+              );
+              ceilingMeshes.push(panel);
+              floorGroup.add(panel);
+            }
+          }
+        }
+
+        if (areaMm2 >= LIT_ROOM_MIN_AREA_MM2) {
+          const c = centroid(room.boundary);
+          lightCandidates.push({
+            group: floorGroup,
+            at: new THREE.Vector3(c.x * MM, ceilingY - 0.15, -c.y * MM),
+            areaMm2,
+            reachM: Math.max(4, Math.hypot(roomW, roomD) * MM * 0.75),
+          });
+        }
+
+        // ---- Skirting -----------------------------------------------------
+        //
+        // A 100 mm band where the wall meets the floor. It is a small thing and
+        // it does more for how built a room looks than anything else here: a
+        // wall plane running straight into a floor plane is the giveaway of an
+        // untrimmed model, because no real room has ever been finished that way.
+        // It is drawn on the room's own boundary rather than on the walls, so it
+        // follows the space you stand in and needs no wall-to-room matching.
+        const skirtColour = new THREE.Color(
+          rd?.finishes.find((f) => f.surface === 'wall_internal')?.materialId
+            ? 0xc9c2b6
+            : 0xb4ada2,
+        );
+        const skirtMaterial = new THREE.MeshStandardMaterial({
+          color: skirtColour,
+          roughness: 0.55,
+        });
+        for (let i = 0; i < room.boundary.length; i++) {
+          const a = room.boundary[i]!;
+          const b = room.boundary[(i + 1) % room.boundary.length]!;
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          if (len < 200) continue;
+          const band = new THREE.Mesh(
+            new THREE.BoxGeometry(len * MM, SKIRTING_HEIGHT_MM * MM, SKIRTING_PROUD_MM * MM),
+            skirtMaterial,
+          );
+          band.position.set(
+            ((a.x + b.x) / 2) * MM,
+            elevation + (SKIRTING_HEIGHT_MM / 2) * MM,
+            -((a.y + b.y) / 2) * MM,
+          );
+          band.rotation.y = -Math.atan2(b.y - a.y, b.x - a.x);
+          band.receiveShadow = true;
+          floorGroup.add(band);
+        }
 
         // ---- Stairs, drawn as real steps ---------------------------------
         // A box labelled "stair" is useless in a walkthrough: you cannot tell
@@ -338,7 +531,6 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
             return Math.abs(Math.min(...sx) - Math.min(...rx)) < 500;
           });
           if (stair) {
-            const rb = boundsOf(room.boundary);
             const count = Math.max(1, Math.round(stair.floorToFloorRise / stair.riserHeight));
             const stepMaterial = new THREE.MeshStandardMaterial({ color: 0xa8a49c, roughness: 0.9 });
             for (let i = 0; i < count; i++) {
@@ -368,23 +560,28 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         // car belongs to the shaft, not to the storey, and is built once below.
 
         // ---- Furniture from the design layer -----------------------------
+        // Every item was a box at the right size, in the right place, at the
+        // right rotation — and unreadable, because a 1,600 x 800 x 750 box is a
+        // desk and a bed and a counter. What makes a chair read as a chair at
+        // walking distance is its silhouette: a gap under the seat, a back that
+        // rises. The shapes are still simple, and each is built inside the
+        // catalogue's own bounding box, so nothing here changes a dimension.
         for (const item of rd?.furniture ?? []) {
           const spec = findFurniture(item.catalogueKey);
-          const colour = spec ? new THREE.Color(spec.placeholderColorHex) : new THREE.Color(0x8892a0);
-          const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(item.width * MM, item.height * MM, item.depth * MM),
-            new THREE.MeshStandardMaterial({ color: colour, roughness: 0.7 }),
+          const piece = buildFurniture(
+            item.catalogueKey,
+            item.width,
+            item.height,
+            item.depth,
+            spec?.placeholderColorHex ?? '#8892a0',
           );
-          mesh.position.set(
-            item.position.x * MM,
-            elevation + (item.height / 2) * MM,
-            -item.position.y * MM,
-          );
-          mesh.rotation.y = -(item.rotationDeg * Math.PI) / 180;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          furnitureMeshes.push(mesh);
-          floorGroup.add(mesh);
+          // The builders return a group with its base at y = 0, which is where a
+          // piece of furniture actually sits — the old box was positioned by its
+          // centre, so every item had to be lifted by half its height.
+          piece.position.set(item.position.x * MM, elevation, -item.position.y * MM);
+          piece.rotation.y = -(item.rotationDeg * Math.PI) / 180;
+          furnitureMeshes.push(piece);
+          floorGroup.add(piece);
         }
       }
 
@@ -411,10 +608,11 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         const owningRoom = floor.rooms.find((r) => r.boundingWallIds.includes(wall.id));
         const rd = owningRoom ? designByRoom.get(owningRoom.id) : undefined;
         const wallFinish = rd?.finishes.find((f) => f.surface === 'wall_internal' && !f.heightLimit);
-        const material = materialFor(
+        const wallMaterial = materialFor(
           wallFinish?.materialId,
           wall.function === 'exterior' ? 0xb9b3a8 : 0xd8d4cc,
         );
+        const wallModuleMm = moduleMmFor(wallFinish?.materialId);
 
         const sorted = [...wall.openings].sort((a, b) => a.distanceAlongWall - b.distanceAlongWall);
         const solids: Array<[number, number]> = [];
@@ -427,19 +625,25 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
         }
         if (cursor < length) solids.push([cursor, length]);
 
+        /** A box of `depthMm` through the wall, placed along it. Millimetres. */
         const addBox = (
           fromAlong: number,
           toAlong: number,
           baseMm: number,
           heightMm: number,
-          mat: THREE.Material,
+          mat: THREE.Material | null,
+          depthMm: number = wall.thickness,
         ) => {
           const segLen = toAlong - fromAlong;
           if (segLen <= 1 || heightMm <= 1) return;
-          const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(segLen * MM, heightMm * MM, wall.thickness * MM),
-            mat,
-          );
+          const geometry = new THREE.BoxGeometry(segLen * MM, heightMm * MM, depthMm * MM);
+          // A box gives every face UV 0..1, so the pattern is sized on the face
+          // that matters — the long one you stand in front of. The pieces either
+          // side of a door are not the same size as the wall they came from, and
+          // a single repeat count across all of them gives the narrow pier tiles
+          // a third the size of its neighbour's.
+          if (!mat) tileUVs(geometry, segLen, heightMm, wallModuleMm);
+          const mesh = new THREE.Mesh(geometry, mat ?? wallMaterial);
           const midAlong = (fromAlong + toAlong) / 2;
           mesh.position.set(
             (wall.start.x + Math.cos(angle) * midAlong) * MM,
@@ -452,19 +656,26 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           floorGroup.add(mesh);
         };
 
-        for (const [a, b] of solids) addBox(a, b, 0, wall.height, material);
+        for (const [a, b] of solids) addBox(a, b, 0, wall.height, null);
 
         for (const o of sorted) {
           const start = Math.max(0, o.distanceAlongWall - o.width / 2);
           const end = Math.min(length, o.distanceAlongWall + o.width / 2);
           const headBase = o.sillHeight + o.height;
-          addBox(start, end, headBase, Math.max(0, wall.height - headBase), material);
-          if (o.sillHeight > 0) addBox(start, end, 0, o.sillHeight, material);
+          addBox(start, end, headBase, Math.max(0, wall.height - headBase), null);
+          if (o.sillHeight > 0) addBox(start, end, 0, o.sillHeight, null);
 
-          const infill = new THREE.Mesh(
-            new THREE.BoxGeometry((end - start) * MM, o.height * MM, wall.thickness * 0.4 * MM),
-            o.kind === 'window' ? glassMaterial : doorMaterial,
+          const leaf = new THREE.BoxGeometry(
+            (end - start) * MM,
+            o.height * MM,
+            wall.thickness * 0.4 * MM,
           );
+          // Grain running up the leaf, at its real width — a door is the one
+          // piece of joinery you always end up standing right in front of.
+          if (o.kind !== 'window') {
+            tileUVs(leaf, end - start, o.height, moduleMmFor('mat_door_flush'));
+          }
+          const infill = new THREE.Mesh(leaf, o.kind === 'window' ? glassMaterial : doorMaterial);
           const midAlong = (start + end) / 2;
           infill.position.set(
             (wall.start.x + Math.cos(angle) * midAlong) * MM,
@@ -473,8 +684,66 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           );
           infill.rotation.y = -angle;
           floorGroup.add(infill);
+
+          // ---- Architrave --------------------------------------------------
+          //
+          // A door was a brown panel set flush in a hole cut through a wall,
+          // which is what a hole cut through a wall looks like — not what a
+          // doorway looks like. The band round the opening stands proud of both
+          // faces, so from either side there is a lit edge and a shadow line,
+          // and the opening reads as something that was built rather than
+          // subtracted.
+          const trimDepth = wall.thickness + ARCHITRAVE_PROUD_MM * 2;
+          // Jambs, one each side, then the head across the top of both.
+          addBox(start - ARCHITRAVE_WIDTH_MM, start, o.sillHeight, o.height, trimMaterial, trimDepth);
+          addBox(end, end + ARCHITRAVE_WIDTH_MM, o.sillHeight, o.height, trimMaterial, trimDepth);
+          addBox(
+            start - ARCHITRAVE_WIDTH_MM,
+            end + ARCHITRAVE_WIDTH_MM,
+            headBase,
+            ARCHITRAVE_WIDTH_MM,
+            trimMaterial,
+            trimDepth,
+          );
+          // A window also gets a sill, which is the piece that projects further
+          // than anything else on the elevation and reads from furthest away.
+          if (o.kind === 'window' && o.sillHeight > 0) {
+            addBox(
+              start - ARCHITRAVE_WIDTH_MM,
+              end + ARCHITRAVE_WIDTH_MM,
+              o.sillHeight - 40,
+              40,
+              trimMaterial,
+              wall.thickness + 120,
+            );
+          }
         }
       }
+    }
+
+    // ---- The lamps that actually light the rooms -------------------------
+    //
+    // Capped, and spent on the biggest rooms. Each light is added to its own
+    // storey's group, so isolating a floor turns off the lights belonging to
+    // every other one — which is both correct and the reason a nine-storey model
+    // still runs.
+    lightCandidates.sort((a, b) => b.areaMm2 - a.areaMm2);
+    for (const candidate of lightCandidates.slice(0, MAX_ROOM_LIGHTS)) {
+      // Intensity in candela — three has used physical units since r155, so the
+      // 1-to-2 that reads right for a directional light means something quite
+      // different here. It is set from the wall a lamp is nearest to, not from
+      // the floor under it: at the value that lit the middle of the room nicely,
+      // the wall a metre and a half away came back at nearly three times white
+      // and every room read as an overexposed photograph. It scales with the
+      // room because a hall needs more than a store.
+      const intensity = Math.min(6, 1.8 + (candidate.areaMm2 / 1_000_000) * 0.03);
+      // Decay 1.7 rather than the physical 2. A real room is lit by many fittings
+      // and by everything the light bounces off; one lamp falling off as the
+      // square leaves a hot pool under the fitting and black corners, which is
+      // less true to the room than a slightly unphysical falloff is.
+      const lamp = new THREE.PointLight(0xfff2dc, intensity, candidate.reachM * 3, 1.7);
+      lamp.position.copy(candidate.at);
+      candidate.group.add(lamp);
     }
 
     // ---- Wayfinding ------------------------------------------------------
@@ -1111,8 +1380,15 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           Math.max(0.5, p.direction.z * distance),
           target.z - p.direction.y * distance,
         );
-        sun.intensity = p.isUp ? 0.4 + Math.sin((p.altitude * Math.PI) / 180) * 2.2 : 0;
-        ambient.intensity = p.isUp ? 0.7 + Math.sin((p.altitude * Math.PI) / 180) * 0.6 : 0.25;
+        sun.intensity = p.isUp ? 0.4 + Math.sin((p.altitude * Math.PI) / 180) * 2.4 : 0;
+        // Sky fill, and only sky fill.
+        //
+        // At 1.3 a hemisphere light returns very nearly the surface's own albedo
+        // everywhere it reaches, which means a pale wall comes back at full
+        // brightness with no shading and no shadow — the model went white and
+        // stayed white. Held down, the sun does the outside and the room lamps do
+        // the inside, and both of them can be seen doing it.
+        ambient.intensity = p.isUp ? 0.22 + Math.sin((p.altitude * Math.PI) / 180) * 0.33 : 0.12;
         // Low sun reads warmer, which is most of what makes a shadow study legible.
         const warmth = p.isUp ? Math.max(0, 1 - p.altitude / 45) : 0;
         sun.color.setRGB(1, 0.92 - warmth * 0.18, 0.79 - warmth * 0.32);
@@ -1418,6 +1694,10 @@ export function WalkthroughView({ project, floors, design }: Props): JSX.Element
           else m.dispose();
         }
       });
+      // The canvases behind the textures outlive the materials that cloned them,
+      // so rebuilding the scene on every design change would leak one set per
+      // rebuild without this.
+      disposeTextures();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
     // designSignature rather than `design`: a new object identity with the same

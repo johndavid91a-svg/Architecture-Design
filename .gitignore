@@ -22,3 +22,4 @@ out/
 
 # Packaged application output
 release/
+packages/desktop/dist-test/

@@ -211,6 +211,18 @@ async function main() {
   step('back to dark', await run(CLICK, 'button', 'Dark'));
   await wait(400);
 
+  // ---- Dress the building ------------------------------------------------
+  // Without this the walkthrough is checked bare: no finishes, no furniture,
+  // every surface on its fallback colour. That is the one state the 3D view is
+  // NOT meant to be judged in, and checking only that state is how the furniture
+  // and the materials went unlooked-at.
+  step('the Design tab opens', await run(CLICK, 'nav button', 'Design'));
+  await wait(600);
+  step('furniture is laid out with the theme', await run(CHECK, 'Lay out furniture', true));
+  step('a theme can be applied to the building', await run(CLICK, 'button', 'Apply to current design'));
+  await wait(importing ? 4000 : 1200);
+  await shot('design-applied');
+
   // ---- 3D ----------------------------------------------------------------
   step('the 3D tab opens', await run(CLICK, 'nav button', '3D'));
   // A nine-storey import is 3,000-odd walls to extrude, and under software
@@ -226,6 +238,27 @@ async function main() {
   step('the model reports its lifts and stairs', {
     ok: /lift shaft/i.test(status),
   });
+
+  // ---- A close look ------------------------------------------------------
+  // The wide orbit shot is where a rendering problem hides: at that distance a
+  // tiled floor, a flat colour and a blown-out white all look the same. Zooming
+  // in is what showed the furniture reading as crates and the interiors clipping
+  // to white, neither of which was visible from the default framing.
+  const zoomed = await win.webContents.executeJavaScript(`(function () {
+    const canvas = document.querySelector('.viewport canvas');
+    if (!canvas) return { ok: false };
+    const r = canvas.getBoundingClientRect();
+    for (let i = 0; i < 22; i++) {
+      canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -60, bubbles: true, cancelable: true,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      }));
+    }
+    return { ok: true };
+  })()`);
+  step('the model can be zoomed into', zoomed);
+  await wait(900);
+  await shot('model-close');
 
   step('one floor at a time can be turned on', await run(CHECK, 'Only this floor', true));
   await wait(importing ? 3000 : 700);
