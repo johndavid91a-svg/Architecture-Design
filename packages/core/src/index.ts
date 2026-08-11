@@ -59,6 +59,7 @@ export * from './import/pdf.js';
 export * from './import/pdf-measure.js';
 export * from './import/sheet.js';
 export * from './import/room-labels.js';
+export * from './import/room-schedule.js';
 export * from './import/area-schedule.js';
 
 export * from './layout/double-loaded.js';

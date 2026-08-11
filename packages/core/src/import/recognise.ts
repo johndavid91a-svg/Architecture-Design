@@ -32,6 +32,7 @@ import type {
 } from './contract.js';
 import { SANITY } from './contract.js';
 import { labelRooms } from './room-labels.js';
+import { roomsFromLabels } from './room-schedule.js';
 
 export interface RecogniseOptions {
   /** A plan carries no heights; this is what rooms and walls get. */
@@ -1186,6 +1187,18 @@ function direction(from: Point2, to: Point2): Point2 {
 /** How far past the inset distance a mitred corner may reach before bevelling. */
 const MITRE_LIMIT = 4;
 
+/** Mean of a polygon's vertices. Good enough to tell two rooms apart. */
+function centreOf(boundary: readonly Point2[]): Point2 {
+  let x = 0;
+  let y = 0;
+  for (const p of boundary) {
+    x += p.x;
+    y += p.y;
+  }
+  const n = Math.max(1, boundary.length);
+  return { x: x / n, y: y / n };
+}
+
 // ---------------------------------------------------------------------------
 // Openings from gaps
 // ---------------------------------------------------------------------------
@@ -1589,7 +1602,7 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
   // the assignment is competitive: a label belongs to the space that contains
   // it, and only a label no space contains is free for a space that has none.
   const labels = labelRooms(boundaries, work.texts, scale);
-  const rooms: CandidateRoom[] = boundaries.map((boundary, i) => {
+  const traced: CandidateRoom[] = boundaries.map((boundary, i) => {
     const label = labels[i]!;
     return {
       name: label.name,
@@ -1606,17 +1619,57 @@ export function recogniseFloor(work: LineWork, options: RecogniseOptions = {}): 
     };
   });
 
+  // ---- What the drawing states about its own rooms ---------------------
+  //
+  // A plan writes each room's size in the middle of it — `HALL 30'-2" x 42'-10"`,
+  // `LIFT 7'-6" x 6'-3"`. Those are the architect's numbers. Tracing is an
+  // attempt to *re-derive* them from line work, and on a dense plan it loses:
+  // the same basement traced to 14% of its stated covered area, while the sizes
+  // written on the sheet sum to 98% of it.
+  //
+  // So the stated sizes win where they exist, and tracing fills the gaps. A room
+  // whose size the drawing gives is not a measurement problem.
+  const stated = roomsFromLabels(work.texts, scale, opts.defaultClearHeightMm);
+
+  let rooms: CandidateRoom[];
+  if (stated.length >= 2) {
+    // Keep a traced face only where it is nowhere near a stated room, so a space
+    // the drawing did not dimension is still picked up.
+    const centres = stated.map((r) => centreOf(r.boundary));
+    const extra = traced.filter((t) => {
+      const c = centreOf(t.boundary);
+      return !centres.some((s2) => Math.hypot(s2.x - c.x, s2.y - c.y) < 2000);
+    });
+    rooms = [...stated, ...extra];
+
+    const totalSqft = stated.reduce((sum, r) => sum + polygonArea(r.boundary), 0) / 92_903.04;
+    issues.push({
+      severity: 'info',
+      code: 'ROOM_SIZES_FROM_DRAWING',
+      message:
+        `${stated.length} space(s) carry their own dimensions on the drawing ` +
+        `(${stated.map((r) => r.name).join(', ')}), totalling ${totalSqft.toFixed(0)} sq ft. Those ` +
+        `sizes were used as written rather than measured from the line work. ` +
+        `${extra.length} further space(s) came from tracing.`,
+      remedy:
+        'Each room is placed centred on its own label, so the sizes are the architect’s and the ' +
+        'positions are approximate. Drag them into place in the 2D plan.',
+    });
+  } else {
+    rooms = traced;
+  }
+
   const named = labels.filter((l) => l.basis !== 'none').length;
-  if (rooms.length > 0) {
+  if (traced.length > 0) {
     issues.push({
       severity: 'info',
       code: 'ROOM_NAMES_READ',
       message:
-        `${named} of ${rooms.length} space(s) took their name from the text on the sheet ` +
+        `${named} of ${traced.length} traced space(s) took their name from the text on the sheet ` +
         `(${labels.filter((l) => l.basis === 'nearby').length} from a label just outside the traced ` +
         `outline). The rest are shown as "Unnamed space" — the drawing wrote no name inside them.`,
       remedy:
-        named < rooms.length
+        named < traced.length
           ? 'Name them in the 2D plan, or import the DXF, where the text sits on its own layer and reads far more reliably.'
           : undefined,
     });

@@ -27,7 +27,8 @@ console.log(`${pages.length} page(s) of vector line work read in ${((Date.now() 
 for (const issue of issues) console.log(`  [${issue.severity}] ${issue.code}: ${issue.message}`);
 
 // ---- Sheet classification ------------------------------------------------
-const sheets = pages.map((p) => core.identifySheet(p.stats.pageNumber, p.texts));
+const readablePages = pages.map((p) => ({ ...p, texts: core.recoverPageTexts(p.texts) }));
+const sheets = readablePages.map((p) => core.identifySheet(p.stats.pageNumber, p.texts));
 const byKind = new Map();
 for (const s of sheets) byKind.set(s.kind, (byKind.get(s.kind) ?? 0) + 1);
 console.log('\nSheet kinds:');
@@ -50,7 +51,11 @@ if (showSheets) {
   }
 }
 
-const chosen = core.chooseFloorSheets(sheets);
+const byPageAll = new Map(readablePages.map((p) => [p.stats.pageNumber, p]));
+const chosen = core.chooseFloorSheets(sheets, (n) => {
+  const pg = byPageAll.get(n);
+  return pg ? core.readLabelledRooms(pg.texts).length : 0;
+});
 console.log(`\nChosen family: ${chosen.family}`);
 console.log(`Storeys imported (${chosen.floors.length}):`);
 for (const f of chosen.floors) {
@@ -58,7 +63,7 @@ for (const f of chosen.floors) {
 }
 
 // ---- What each storey turned into ---------------------------------------
-const byPage = new Map(pages.map((p) => [p.stats.pageNumber, p]));
+const byPage = byPageAll;
 let totalRooms = 0;
 let named = 0;
 console.log('\nWhat each storey produced:');

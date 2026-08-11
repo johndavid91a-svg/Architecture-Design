@@ -121,14 +121,9 @@ export function recoverTitle(raw: string): { title: string; recovered: boolean }
   if (looksLikeWords(raw)) return { title: raw, recovered: false };
 
   for (let shift = 1; shift <= 64; shift++) {
-    const candidate = [...raw]
-      .map((ch) => {
-        const code = ch.charCodeAt(0);
-        // Only shift printable ASCII; spaces and punctuation frequently do not
-        // survive the encoding and must not be dragged out of range.
-        return code >= 33 && code <= 126 ? String.fromCharCode(code + shift) : ch;
-      })
-      .join('');
+    // Only printable ASCII is shifted; spaces and punctuation frequently do not
+    // survive the encoding and must not be dragged out of range.
+    const candidate = shiftText(raw, shift);
     if (looksLikeWords(candidate)) return { title: candidate, recovered: true };
   }
 
@@ -140,6 +135,106 @@ function looksLikeWords(text: string): boolean {
   const letters = text.toUpperCase().replace(/[^A-Z]/g, '');
   if (letters.length < 4) return false;
   return VOCABULARY.some((word) => letters.includes(word));
+}
+
+/**
+ * Recover every string on a sheet whose font lost its `ToUnicode` map.
+ *
+ * `recoverTitle` fixes one string at a time, which was enough to name the sheet.
+ * It is not enough to read it: on the set measured here the third-floor layout
+ * plan is entirely in a broken subset font, so its title recovered while every
+ * room name and every dimension on it stayed as mojibake — and that sheet alone
+ * contributed no rooms at all while its neighbours contributed seven each.
+ *
+ * The shift is a property of the page, not of the string, so it is found once
+ * across all the text and applied to all of it. A shift is accepted only when it
+ * makes substantially more of the page readable than leaving it alone, so a sheet
+ * that was fine to begin with is never touched.
+ */
+export function recoverPageTexts(texts: readonly TextItem[]): TextItem[] {
+  // Only SOME of the page is broken. On the sheet that exposed this the title
+  // block reads perfectly and every string inside the drawing is mojibake, so a
+  // single shift applied to everything fixes the rooms and destroys the title
+  // block. The shift is found from the page as a whole and then applied only to
+  // the strings that need it.
+  const broken = texts.filter((t) => !readsAsDrawingText(t.text));
+  if (broken.length === 0) return [...texts];
+
+  let bestShift = 0;
+  let bestScore = 0;
+  for (let shift = 1; shift <= 64; shift++) {
+    const score = broken.filter((t) => readsAsDrawingText(shiftText(t.text, shift))).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestShift = shift;
+    }
+  }
+
+  // Three strings recovered, and a real share of what was broken. One or two
+  // could be coincidence on a page of hundreds of runs, and a shift applied
+  // hopefully turns correct text into nonsense — which is the failure this whole
+  // area exists to prevent.
+  if (bestShift === 0 || bestScore < 3) return [...texts];
+
+  return texts.map((t) => {
+    if (readsAsDrawingText(t.text)) return t;
+    const shifted = shiftText(t.text, bestShift);
+    return readsAsDrawingText(shifted) ? { ...t, text: shifted } : t;
+  });
+}
+
+/**
+ * Words that appear on an architectural sheet somewhere — not just in its title.
+ *
+ * `looksLikeWords` is deliberately narrow because it decides whether a *sheet
+ * title* has been recovered, and a wrong shift there mislabels a storey. Reading
+ * the body of a sheet needs a wider net: the strings that matter most are room
+ * names and dimensions, and neither is in the title vocabulary.
+ */
+const DRAWING_WORDS = [
+  ...VOCABULARY,
+  'HALL', 'KITCHEN', 'BATH', 'TOILET', 'LIFT', 'STAIR', 'STAIRS', 'BALCONY', 'LOBBY',
+  'STORE', 'ROOM', 'LOUVER', 'DUCT', 'LANDING', 'TERRACE', 'PORCH', 'SUMP', 'TANK',
+  'WATER', 'MACHINE', 'PARKING', 'SHOP', 'OFFICE', 'LOUNGE', 'DINING', 'BEDROOM',
+  'DRAWING', 'PLOT', 'SCALE', 'DATE', 'PROJECT', 'TITLE', 'OWNER', 'DESIGN', 'BELOW',
+  'EMG', 'UPVC', 'PIPE', 'WIDE', 'COVERED', 'AREA', 'TOTAL', 'BLOCK', 'SECTOR',
+];
+
+/**
+ * Does this string read as something written on a drawing?
+ *
+ * Two things count, and a dimension counts double in practice because it is the
+ * hardest pattern to produce by accident: `30'-2" x 42'-10"` under a wrong shift
+ * is essentially never a well-formed feet-and-inches string.
+ */
+function readsAsDrawingText(text: string): boolean {
+  if (/\d+\s*'\s*(?:-\s*\d+)?\s*(?:"|'')/.test(text)) return true;
+  const letters = text.toUpperCase().replace(/[^A-Z]/g, '');
+  if (letters.length < 3) return false;
+  return DRAWING_WORDS.some((word) => letters.includes(word));
+}
+
+/**
+ * Shift a string's character codes, leaving anything outside the range alone.
+ *
+ * The range starts at 1, not at the printable ASCII floor of 33, because a
+ * subset font numbers its glyphs from zero: in the font on the sheet that
+ * exposed this, space is 0x03 and the digits run 0x13 to 0x1C. Stopping at 33
+ * recovered every room NAME on that sheet and not one of its dimensions —
+ * `30'-2" x 42'-10"` stayed as control codes — so the storey came back with the
+ * right labels and no sizes at all, which is the least useful of the three
+ * possible outcomes.
+ *
+ * Widening it is safe because a shift is only ever applied to a string that does
+ * not already read, and only when the result does.
+ */
+function shiftText(text: string, shift: number): string {
+  return [...text]
+    .map((ch) => {
+      const code = ch.charCodeAt(0);
+      return code >= 1 && code <= 126 ? String.fromCharCode(code + shift) : ch;
+    })
+    .join('');
 }
 
 /**
@@ -240,10 +335,37 @@ export function identifySheet(pageNumber: number, texts: readonly TextItem[]): S
  *
  * Exactly one family is used. Importing two gives two copies of every storey.
  */
-export function preferredFamily(sheets: readonly SheetIdentity[]): PlanFamily | null {
+export function preferredFamily(
+  sheets: readonly SheetIdentity[],
+  /**
+   * How much a sheet is worth, usually the number of rooms it dimensions.
+   *
+   * Without it the choice is a fixed preference for working plans, which was a
+   * guess that turned out to be wrong for this set: the layout plans dimension
+   * six or seven rooms a sheet and the working plans dimension one. Asking the
+   * sheets rather than assuming is both more accurate and self-correcting for a
+   * set drawn to another office's conventions.
+   */
+  score?: (pageNumber: number) => number,
+): PlanFamily | null {
   const plans = sheets.filter((s) => s.kind === 'floor_plan');
+  const order = ['working', 'layout', 'opening', 'other'] as const;
   const count = (f: PlanFamily) => plans.filter((s) => s.family === f).length;
-  for (const family of ['working', 'layout', 'opening', 'other'] as const) {
+
+  if (score) {
+    let best: { family: PlanFamily; total: number } | null = null;
+    for (const family of order) {
+      if (count(family) === 0) continue;
+      const total = plans
+        .filter((s) => s.family === family)
+        .reduce((sum, s) => sum + score(s.pageNumber), 0);
+      if (best === null || total > best.total) best = { family, total };
+    }
+    // A tie, or nothing dimensioned anywhere, falls back to the fixed order.
+    if (best && best.total > 0) return best.family;
+  }
+
+  for (const family of order) {
     if (count(family) > 0) return family;
   }
   return null;
@@ -264,8 +386,11 @@ export interface ChosenSheets {
  * revision, or a plan split over two sheets — the first is taken and the
  * duplicate reported rather than silently stacked as an extra floor.
  */
-export function chooseFloorSheets(sheets: readonly SheetIdentity[]): ChosenSheets {
-  const family = preferredFamily(sheets);
+export function chooseFloorSheets(
+  sheets: readonly SheetIdentity[],
+  score?: (pageNumber: number) => number,
+): ChosenSheets {
+  const family = preferredFamily(sheets, score);
   if (family === null) return { family: null, floors: [], all: sheets };
 
   const byLevel = new Map<number, SheetIdentity>();

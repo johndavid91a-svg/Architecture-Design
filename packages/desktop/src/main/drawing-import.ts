@@ -251,11 +251,72 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
     // plan, structural grids, opening plans, area blocks, elevations, sections
     // and details. Taking one floor per page turned a nine-storey building into
     // a 52-storey tower — a complete, confident, wrong answer.
-    const sheets = pages.map((page) => core.identifySheet(page.stats.pageNumber, page.texts));
-    const chosen = core.chooseFloorSheets(sheets);
-    const byPage = new Map(pages.map((p) => [p.stats.pageNumber, p]));
+    //
+    // Text first. A sheet whose font lost its `ToUnicode` map hands over glyph
+    // codes, and on this set the third-floor layout plan was entirely mojibake:
+    // its title recovered, so it was classified correctly, but every room name
+    // and dimension on it stayed unreadable and it alone contributed no rooms
+    // while its neighbours contributed seven each. The shift belongs to the
+    // page, so it is undone for the whole page before anything is read from it.
+    const readable = pages.map((page) => ({
+      ...page,
+      texts: core.recoverPageTexts(page.texts),
+    }));
 
-    for (const sheet of chosen.floors) {
+    const sheets = readable.map((page) => core.identifySheet(page.stats.pageNumber, page.texts));
+    const byPage = new Map(readable.map((p) => [p.stats.pageNumber, p]));
+
+    // Which family becomes the model is decided by which one actually carries
+    // the room schedule, not by a fixed preference. Working plans were preferred
+    // on the assumption that they carry the room names; on this set the layout
+    // plans dimension six or seven rooms a sheet and the working plans one.
+    const dimensioned = (pageNumber: number) => {
+      const page = byPage.get(pageNumber);
+      return page ? core.readLabelledRooms(page.texts).length : 0;
+    };
+    const chosen = core.chooseFloorSheets(sheets, dimensioned);
+
+    // ---- One storey at a time, from whichever sheet reads ------------------
+    //
+    // A set draws every storey several times over, and the chosen family is the
+    // one that reads best *overall* — not necessarily for every storey. On this
+    // set the third-floor layout plan is drawn in a subset font whose digits are
+    // not in ASCII order, so its room names recover and its dimensions do not,
+    // and that storey alone came back with 35 sq ft against its neighbours'
+    // 1,629. The opening plan of the same storey reads perfectly.
+    //
+    // Substituting is safe because it is the same storey of the same building,
+    // drawn twice; it is reported so the user knows which sheet each floor came
+    // from.
+    const substituted: string[] = [];
+    const floorSheets = chosen.floors.map((floor) => {
+      const own = dimensioned(floor.pageNumber);
+      if (own >= 2) return floor;
+      const better = sheets
+        .filter((s) => s.kind === 'floor_plan' && s.storey === floor.storey && s.pageNumber !== floor.pageNumber)
+        .map((s) => ({ sheet: s, rooms: dimensioned(s.pageNumber) }))
+        .sort((a, b) => b.rooms - a.rooms)[0];
+      if (!better || better.rooms < 2 || better.rooms <= own) return floor;
+      substituted.push(
+        `${floor.storey} from the ${better.sheet.family} plan on page ${better.sheet.pageNumber} ` +
+          `(${better.rooms} dimensioned room(s)) instead of page ${floor.pageNumber} (${own})`,
+      );
+      // Keep this storey's level and name; take the other sheet's geometry.
+      return { ...floor, pageNumber: better.sheet.pageNumber };
+    });
+
+    if (substituted.length > 0) {
+      allIssues.push({
+        severity: 'info',
+        code: 'SHEET_SUBSTITUTED',
+        message:
+          `${substituted.length} storey(s) were read from a different sheet of the same storey, ` +
+          `because the one in the chosen family carried no readable room dimensions: ` +
+          `${substituted.join('; ')}.`,
+      });
+    }
+
+    for (const sheet of floorSheets) {
       const page = byPage.get(sheet.pageNumber);
       if (!page || page.toMmScale <= 0) continue;
 
@@ -311,7 +372,7 @@ async function importPdf(path: string): Promise<DrawingImportPayload> {
     // anywhere from 21 to 976, and nothing in the pipeline could tell. A model
     // wrong by a factor of eighty that says so is useful. The same model
     // presenting itself as measured is not.
-    const stated = core.mergeAreaSchedules(pages.map((p) => core.readAreaSchedule(p.texts)));
+    const stated = core.mergeAreaSchedules(readable.map((p) => core.readAreaSchedule(p.texts)));
     if (stated) {
       const summary = stated.perStorey.map((s) => `${s.storey} ${s.sqft.toLocaleString()} sq ft`).join(', ');
       allIssues.push({
