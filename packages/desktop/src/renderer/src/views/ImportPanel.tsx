@@ -15,6 +15,8 @@ interface Props {
   readonly city: string;
   readonly authority: RegulatoryAuthority;
   readonly onCreated: (project: Project) => void;
+  /** Told the path of the attached file, so the Drawings tab can show its sheets. */
+  readonly onImported?: (path: string) => void;
 }
 
 interface State {
@@ -37,7 +39,7 @@ const sqft = (mm2: number) => mm2 / 92_903.04;
  * spaces — while a PDF or DXF arrives entirely `extracted`, because a pair of
  * parallel lines might be a wall or might be a kerb, and only a person can say.
  */
-export function ImportPanel({ projectName, city, authority, onCreated }: Props): JSX.Element {
+export function ImportPanel({ projectName, city, authority, onCreated, onImported }: Props): JSX.Element {
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -52,6 +54,7 @@ export function ImportPanel({ projectName, city, authority, onCreated }: Props):
         setMessage(result.error);
         return;
       }
+      onImported?.(String(result.filename ?? ''));
       setState({
         filename: String(result.filename ?? ''),
         format: String(result.format ?? ''),

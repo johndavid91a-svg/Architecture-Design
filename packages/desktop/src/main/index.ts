@@ -25,7 +25,7 @@ import {
 } from '../shared/ipc.js';
 import { listProjects, loadProject, saveProject } from './storage.js';
 import { aiStatus, callModel, clearKeyCache, keyLocationHint } from './ai.js';
-import { importDrawingFile } from './drawing-import.js';
+import { importDrawingFile, listDrawingSheets, readDrawingSheet } from './drawing-import.js';
 
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -206,6 +206,18 @@ function registerHandlers(): void {
       return { cancelled: false, ok: false, error: (error as Error).message };
     }
   });
+
+  ipcMain.handle(IPC.drawingSheets, async (_event, path: string) => {
+    try {
+      return await listDrawingSheets(path);
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle(IPC.drawingSheet, async (_event, path: string, pageNumber: number) =>
+    readDrawingSheet(path, pageNumber),
+  );
 
   // ---- AI ---------------------------------------------------------------
   ipcMain.handle(IPC.aiStatus, async () => aiStatus());

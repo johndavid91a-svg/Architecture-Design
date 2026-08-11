@@ -107,6 +107,18 @@ async function main() {
   step('the template screen offers a building', await run(CLICK, 'button', 'Create this building'));
   await wait(900);
 
+  // ---- Drawings ----------------------------------------------------------
+  step('the Drawings tab opens', await run(CLICK, 'nav button', 'Drawings'));
+  await wait(600);
+  await shot('drawings-empty');
+  const emptyText = await win.webContents.executeJavaScript(
+    `(document.querySelector('.list-empty')?.textContent || '').trim()`,
+  );
+  step('it says plainly that no drawing is attached', {
+    ok: /no drawing is attached/i.test(emptyText),
+    saw: emptyText.slice(0, 120),
+  });
+
   // ---- 2D plan -----------------------------------------------------------
   step('the 2D Plan tab opens', await run(CLICK, 'nav button', '2D Plan'));
   await wait(700);

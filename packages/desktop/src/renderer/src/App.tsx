@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { computeTakeoff, type Project } from '@adp/core';
 import { SetupView } from './views/SetupView.js';
+import { DrawingsView } from './views/DrawingsView.js';
 import { PlanView } from './views/PlanView.js';
 import { WalkthroughView } from './views/WalkthroughView.js';
 import { DesignView } from './views/DesignView.js';
@@ -18,6 +19,7 @@ import { captureAll } from './state/view-capture.js';
 
 type Tab =
   | 'setup'
+  | 'drawings'
   | 'plan'
   | 'walk'
   | 'design'
@@ -32,6 +34,9 @@ type Tab =
 
 const TABS: ReadonlyArray<{ id: Tab; label: string; needsProject: boolean }> = [
   { id: 'setup', label: 'Project', needsProject: false },
+  // Before the plan, deliberately: the drawings are the document the user
+  // recognises, and everything after this tab is this app's reading of them.
+  { id: 'drawings', label: 'Drawings', needsProject: false },
   { id: 'plan', label: '2D Plan', needsProject: true },
   { id: 'walk', label: '3D', needsProject: true },
   { id: 'design', label: 'Design', needsProject: true },
@@ -45,12 +50,20 @@ const TABS: ReadonlyArray<{ id: Tab; label: string; needsProject: boolean }> = [
   { id: 'sources', label: 'Price Sources', needsProject: false },
 ];
 
-const FULL_BLEED: ReadonlySet<Tab> = new Set(['plan', 'walk']);
+const FULL_BLEED: ReadonlySet<Tab> = new Set(['drawings', 'plan', 'walk']);
 
 export function App(): JSX.Element {
   const store = useProjectStore();
   const [tab, setTab] = useState<Tab>('setup');
   const [status, setStatus] = useState('');
+  /**
+   * The file the current project was imported from.
+   *
+   * Held for the session rather than saved into the project: it is a path on
+   * this machine, and a project file that carries one is a project file that
+   * breaks when it is opened anywhere else.
+   */
+  const [drawingPath, setDrawingPath] = useState('');
 
   // One price book per session. It starts EMPTY — the application ships no
   // prices at all, by design. See PriceBook for why.
@@ -117,7 +130,10 @@ export function App(): JSX.Element {
       </header>
 
       <main className={FULL_BLEED.has(tab) ? 'content full' : 'content'}>
-        {tab === 'setup' && <SetupView project={store.project} onCreated={onCreated} />}
+        {tab === 'setup' && (
+          <SetupView project={store.project} onCreated={onCreated} onImported={setDrawingPath} />
+        )}
+        {tab === 'drawings' && <DrawingsView path={drawingPath} />}
         {tab === 'plan' && <PlanView store={store} />}
         {tab === 'walk' && store.project && (
           <WalkthroughView project={store.project} floors={store.floors} design={store.design} />

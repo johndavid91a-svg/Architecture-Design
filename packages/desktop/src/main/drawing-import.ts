@@ -456,3 +456,94 @@ function fail(format: DrawingFormat, filename: string, message: string): Drawing
     stats: null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Viewing the sheets
+// ---------------------------------------------------------------------------
+
+/**
+ * Reading the drawing set for display, rather than for import.
+ *
+ * The Drawings tab shows the sheets themselves — the thing the user actually
+ * recognises, and the thing they need beside the model to check it. It is drawn
+ * from the same line work the importer reads, which has a second benefit worth
+ * more than the first: what you see on that tab is exactly what the app saw. A
+ * sheet that looks empty there is a sheet the importer got nothing from, and
+ * that is a far better explanation than a number in an issue list.
+ *
+ * The extraction is not cached. A 56-sheet set takes about eight seconds to
+ * parse, and keeping every page's geometry in the project file would add
+ * megabytes to every save for something the user looks at occasionally.
+ */
+export interface SheetSummary {
+  readonly pageNumber: number;
+  readonly title: string;
+  readonly kind: string;
+  readonly family: string;
+  readonly storey?: string;
+  readonly segmentCount: number;
+  readonly toMmScale: number;
+}
+
+export async function listDrawingSheets(path: string): Promise<SheetSummary[]> {
+  const core = await import('@adp/core');
+  const data = new Uint8Array(await readFile(path));
+  const { pages } = await core.extractPdfLineWork(data);
+
+  return pages.map((page) => {
+    const texts = core.recoverPageTexts(page.texts);
+    const sheet = core.identifySheet(page.stats.pageNumber, texts);
+    return {
+      pageNumber: page.stats.pageNumber,
+      title: sheet.title || `Page ${page.stats.pageNumber}`,
+      kind: sheet.kind,
+      family: sheet.family,
+      storey: sheet.storey,
+      segmentCount: page.segments.length,
+      toMmScale: page.toMmScale,
+    };
+  });
+}
+
+export interface SheetContent {
+  readonly pageNumber: number;
+  readonly title: string;
+  readonly extent: { minX: number; minY: number; maxX: number; maxY: number };
+  readonly toMmScale: number;
+  /** `[x1, y1, x2, y2, width]`, packed rather than as objects — a sheet is thousands of lines. */
+  readonly lines: Array<[number, number, number, number, number]>;
+  readonly texts: Array<{ t: string; x: number; y: number; h: number }>;
+  readonly error?: string;
+}
+
+export async function readDrawingSheet(path: string, pageNumber: number): Promise<SheetContent> {
+  const empty = {
+    pageNumber,
+    title: `Page ${pageNumber}`,
+    extent: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+    toMmScale: 0,
+    lines: [] as Array<[number, number, number, number, number]>,
+    texts: [] as Array<{ t: string; x: number; y: number; h: number }>,
+  };
+
+  try {
+    const core = await import('@adp/core');
+    const data = new Uint8Array(await readFile(path));
+    const { pages } = await core.extractPdfLineWork(data);
+    const page = pages.find((p) => p.stats.pageNumber === pageNumber);
+    if (!page) return { ...empty, error: `Page ${pageNumber} carries no vector line work.` };
+
+    const texts = core.recoverPageTexts(page.texts);
+    const sheet = core.identifySheet(pageNumber, texts);
+    return {
+      pageNumber,
+      title: sheet.title || `Page ${pageNumber}`,
+      extent: page.extent,
+      toMmScale: page.toMmScale,
+      lines: page.segments.map((s) => [s.a.x, s.a.y, s.b.x, s.b.y, s.width ?? 0]),
+      texts: texts.map((t) => ({ t: t.text, x: t.at.x, y: t.at.y, h: t.heightHint ?? 0 })),
+    };
+  } catch (error) {
+    return { ...empty, error: (error as Error).message };
+  }
+}

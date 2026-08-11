@@ -16,6 +16,8 @@ export const IPC = {
   exportPdf: 'export:pdf',
   importCsv: 'import:csv',
   importDrawing: 'import:drawing',
+  drawingSheets: 'import:drawingSheets',
+  drawingSheet: 'import:drawingSheet',
   appInfo: 'app:info',
   aiStatus: 'ai:status',
   aiCall: 'ai:call',
@@ -68,6 +70,28 @@ export interface ImportResult {
  * drawing is untrusted input, and web-ifc needs its WebAssembly from disk,
  * which a sandboxed renderer cannot load.
  */
+/** One sheet of an imported set, as the Drawings tab lists it. */
+export interface DrawingSheetSummary {
+  readonly pageNumber: number;
+  readonly title: string;
+  readonly kind: string;
+  readonly family: string;
+  readonly storey?: string;
+  readonly segmentCount: number;
+  readonly toMmScale: number;
+}
+
+/** The line work of one sheet, for drawing it on screen. */
+export interface DrawingSheetContent {
+  readonly pageNumber: number;
+  readonly title: string;
+  readonly extent: { minX: number; minY: number; maxX: number; maxY: number };
+  readonly toMmScale: number;
+  readonly lines: ReadonlyArray<readonly [number, number, number, number, number]>;
+  readonly texts: ReadonlyArray<{ readonly t: string; readonly x: number; readonly y: number; readonly h: number }>;
+  readonly error?: string;
+}
+
 export interface DrawingImport {
   readonly cancelled: boolean;
   readonly ok?: boolean;
@@ -109,6 +133,8 @@ export interface DesktopApi {
   exportPdf(request: PdfRequest): Promise<ExportResult>;
   importCsv(): Promise<ImportResult>;
   importDrawing(): Promise<DrawingImport>;
+  drawingSheets(path: string): Promise<DrawingSheetSummary[]>;
+  drawingSheet(path: string, pageNumber: number): Promise<DrawingSheetContent>;
   appInfo(): Promise<AppInfo>;
   aiStatus(): Promise<AiStatus>;
   aiCall(request: AiCallRequest): Promise<AiCallResult>;

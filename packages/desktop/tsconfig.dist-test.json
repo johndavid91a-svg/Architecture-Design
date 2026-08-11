@@ -1,0 +1,1 @@
+{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "outDir": "dist-test", "skipLibCheck": true, "types": ["node"] }, "include": ["src/main/drawing-import.ts"] }

@@ -18,6 +18,8 @@ import {
 interface Props {
   readonly project: Project | null;
   readonly onCreated: (project: Project) => void;
+  /** Told the path of an attached drawing, so the Drawings tab can show it. */
+  readonly onImported?: (path: string) => void;
 }
 
 interface RoomDraft {
@@ -64,7 +66,7 @@ function draft(name: string, use: RoomUse, width: string, depth: string): RoomDr
   return { id: nextId++, name, use, width, depth };
 }
 
-export function SetupView({ project, onCreated }: Props): JSX.Element {
+export function SetupView({ project, onCreated, onImported }: Props): JSX.Element {
   const [name, setName] = useState('National Space Centre');
   const [buildingType, setBuildingType] = useState<BuildingType>('commercial_plaza');
   const [city, setCity] = useState('Islamabad');
@@ -262,6 +264,7 @@ export function SetupView({ project, onCreated }: Props): JSX.Element {
           city={city.trim()}
           authority={authority}
           onCreated={onCreated}
+          onImported={onImported}
         />
       )}
 
