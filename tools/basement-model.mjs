@@ -46,7 +46,7 @@ const EXISTING = [
 
 /** New, enclosed: these get partitions and a door. */
 const ENCLOSED = [
-  ['TUCK SHOP / CAFE', 'retail', 20.9, 0.8, 11, 9, 'south'],
+  ['TUCK SHOP / CAFE', 'retail', 20.9, 0.8, 11, 9, 'west'],
   ['PRAYER ROOM', 'other', 20.9, 10.8, 18.83, 15.5, 'west'],
   ['ABLUTION', 'toilet', 16.4, 16.3, 4.333, 9, 'south'],
 ];
@@ -86,6 +86,24 @@ const wall = (x1, y1, x2, y2, thickness, fn, openings = []) => ({
   openings,
 });
 
+/**
+ * A way through a wall with NO DOOR IN IT.
+ *
+ * Modelled as a `door` opening because that is the kind the twin has for a gap
+ * you walk through at floor level, but nothing hangs in it. A tuck shop counter
+ * and a prayer hall in a private basement do not need one, and the two that were
+ * drawn here could not be opened anyway.
+ */
+const opening = (alongFt, widthFt = 4) => ({
+  kind: 'door',
+  distanceAlongWall: Math.round(alongFt * FT),
+  width: Math.round(widthFt * FT),
+  height: Math.round(7 * FT),
+  sillHeight: 0,
+  confidence: 'inferred',
+  note: 'Open threshold. No door leaf.',
+});
+
 const door = (alongFt, widthFt = 3) => ({
   kind: 'door',
   distanceAlongWall: Math.round(alongFt * FT),
@@ -96,13 +114,26 @@ const door = (alongFt, widthFt = 3) => ({
   note: 'Proposed doorway.',
 });
 
-/** Four partitions round an enclosed zone, with its door on the named side. */
-function enclose(x, y, w, d, side) {
+/**
+ * Four partitions round an enclosed zone, with its way in on the named side.
+ *
+ * `at` is the distance along that side, defaulting to its middle, and `wide` is
+ * the opening's width. Both exist because the middle was blocked twice: the
+ * prayer room's opening sat 99 mm from the ablution's outer wall and the tuck
+ * shop's 155 mm from the prayer room's, and neither room could be entered at
+ * all. A body needs about 550 mm.
+ *
+ * These are OPENINGS, not doorways — no leaf, as asked. The distinction matters
+ * to the model: an opening still cuts the wall, so removing the entry entirely
+ * would have sealed 391 sq ft of basement rather than freeing it.
+ */
+function enclose(x, y, w, d, side, at = null, wide = 4) {
+  const along = (span) => (at === null ? span / 2 : at);
   const doors = {
-    north: [wall(x, y, x + w, y, PARTITION_MM, 'partition', [door(w / 2)])],
-    south: [wall(x, y + d, x + w, y + d, PARTITION_MM, 'partition', [door(w / 2)])],
-    west: [wall(x, y, x, y + d, PARTITION_MM, 'partition', [door(d / 2)])],
-    east: [wall(x + w, y, x + w, y + d, PARTITION_MM, 'partition', [door(d / 2)])],
+    north: [wall(x, y, x + w, y, PARTITION_MM, 'partition', [opening(along(w), wide)])],
+    south: [wall(x, y + d, x + w, y + d, PARTITION_MM, 'partition', [opening(along(w), wide)])],
+    west: [wall(x, y, x, y + d, PARTITION_MM, 'partition', [opening(along(d), wide)])],
+    east: [wall(x + w, y, x + w, y + d, PARTITION_MM, 'partition', [opening(along(d), wide)])],
   };
   const plain = {
     north: wall(x, y, x + w, y, PARTITION_MM, 'partition'),
@@ -115,6 +146,23 @@ function enclose(x, y, w, d, side) {
     .map(([, w2]) => w2)
     .concat(doors[side]);
 }
+
+/**
+ * Where each proposed room's opening goes, in feet along the named side.
+ *
+ * Left to the middle, both of these landed against another wall — see the note
+ * on `enclose`. Measured from the wall's start.
+ */
+const OPENING_AT = {
+  // Measured from the wall's START, which for a west wall is its NORTH end.
+  'PRAYER ROOM': 2.75,
+  // 7'-6" and not the middle: the tea counter is 9'-10" long in an 11'-0" room,
+  // so it runs almost wall to wall and there is only one stretch of this wall
+  // it is not standing against.
+  // 6'-6": a 4'-0" opening centred at 7'-6" runs past the end of a 9'-0"
+  // wall, and an opening that does not fit its wall is no opening at all.
+  'TUCK SHOP / CAFE': 6.5,
+};
 
 export function basementFloor() {
   const rooms = [
@@ -154,7 +202,12 @@ export function basementFloor() {
     // left open — that opening is why the games sit either side of it.
     wall(9.833, 0, 9.833, 15.4, EXTERIOR_MM, 'interior'),
     wall(9.833, 19.4, 9.833, 43.5, EXTERIOR_MM, 'interior'),
-    ...ENCLOSED.flatMap(([, , x, y, w, d, side]) => enclose(x, y, w, d, side)),
+    // The prayer room's way in sits at 12'-9" along its west wall, not the 7'-9"
+    // middle: the ablution stands against the first 10 ft of it, 99 mm away.
+    // The tuck shop's moves off its own middle for the same reason.
+    ...ENCLOSED.flatMap(([name, , x, y, w, d, side]) =>
+      enclose(x, y, w, d, side, OPENING_AT[name] ?? null),
+    ),
   ];
 
   return {

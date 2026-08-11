@@ -323,10 +323,12 @@ const ROOMS = [
       { key: 'counter.servery.3000', label: 'Tea counter', position: at(8046, 12608), rotationDeg: 0 },
       // The planting the games floor could not hold. South-west corner, clear of
       // the counter's 900 mm service side.
-      { key: 'decor.planter.large', label: 'Planter', position: at(6800, 10800), rotationDeg: 0 },
-      { key: 'seating.stool.bar', label: 'Stool', position: at(7150, 11800), rotationDeg: 0 },
-      { key: 'seating.stool.bar', label: 'Stool', position: at(8046, 11800), rotationDeg: 0 },
-      { key: 'seating.stool.bar', label: 'Stool', position: at(8942, 11800), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(9200, 10700), rotationDeg: 0 },
+            // Spread, and held south of the threshold, which moved to this room's
+      // WEST wall when its blocked south door was replaced by an opening.
+      { key: 'seating.stool.bar', label: 'Stool', position: at(7500, 11950), rotationDeg: 0 },
+      { key: 'seating.stool.bar', label: 'Stool', position: at(8300, 11950), rotationDeg: 0 },
+      { key: 'seating.stool.bar', label: 'Stool', position: at(9100, 11950), rotationDeg: 0 },
     ],
     rationale:
       'Hard-wearing underfoot and warm at eye level: a 3 m counter along the north wall with the warm ' +
@@ -348,7 +350,9 @@ const ROOMS = [
     ],
     furniture: [
       ...prayerRugs(at(9700, 7500), 3, 4),
-      { key: 'storage.shoe.rack', label: 'Shoe rack', position: at(6602, 9100), rotationDeg: 90 },
+      // Clear of the threshold, which is now at y 9,129 on this wall. The rack
+      // stood squarely in it and shut the room off with the door removed.
+      { key: 'storage.shoe.rack', label: 'Shoe rack', position: at(6650, 7000), rotationDeg: 90 },
     ],
     rationale:
       'Carpet, calm walls, nothing busy: the one room on this floor that is not entertainment. Twelve ' +

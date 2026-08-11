@@ -502,6 +502,15 @@ check(
 let unreachableItems = 0;
 const strandedByBuilding = new Set();
 for (const item of allFurniture) {
+  // A RUG IS WALKED ON, NOT WALKED UP TO.
+  //
+  // The rule below asks whether a person can stand on bare floor beside an item
+  // and touch it. That is right for a table and wrong for a prayer rug: rows 2
+  // and 3 of a mat block are reached by stepping onto the row in front, which is
+  // exactly how a prayer hall is used. It is the same reason the rug carries
+  // clearanceFront 0 in the catalogue — reserving floor round it would delete
+  // the space the next row needs.
+  if (item.catalogueKey.startsWith('decor.prayer') || item.catalogueKey.startsWith('decor.rug')) continue;
   // Somewhere a person can stand and touch it: any reached cell inside a ring
   // one body deep round the item. Testing only the ring's corners would call an
   // item unreachable whenever its neighbours happen to sit on the diagonals.
