@@ -459,64 +459,127 @@ function executiveHall() {
   return {
     name: 'HALL',
     finishes: [
-      floor(FLOOR_EXEC, 'Marble through the centre: this is the floor visitors are brought to.'),
-      floor(FLOOR_SOFT, 'Carpet tile inside the offices.'),
+      floor(FLOOR_EXEC, 'Marble through the circulation: this is the floor visitors are brought to.'),
       wall(WALL_WARM, 'Warm plaster, not the office emulsion below.'),
-      featureWall(WALL_FEATURE, 'east', 'The boardroom’s end wall, clad.'),
       skirting(),
     ],
     ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
     lighting: [
-      warmLight('cove', 10, 18, 'Perimeter cove, warm, and the reason this floor reads differently from the ones below.'),
-      warmLight('pendant', 3, 40, 'Over the boardroom table.'),
+      warmLight('cove', 10, 18, 'Perimeter cove, warm, and most of why this floor reads differently from the ones below.'),
       warmLight('recessed_downlight', 12, 12, 'Fill only, at 3000 K.'),
       warmLight('floor_lamp', 2, 15, 'In the lounge.'),
     ],
     furniture: [
-      // Four executive offices, two north and two south of the boardroom.
-      ...[[13.5, 7], [35, 7], [13.5, 38], [35, 38]].map(([x, y], i) => ({
-        key: 'desk.executive.1800',
-        label: `Executive desk ${i + 1}`,
-        position: at(x, y),
-        rotationDeg: y < 22 ? 0 : 180,
-      })),
-      ...[[13.5, 7 + AT_EXEC], [35, 7 + AT_EXEC], [13.5, 38 - AT_EXEC], [35, 38 - AT_EXEC]].map(([x, y], i) => ({
-        key: 'chair.executive',
-        label: `Executive chair ${i + 1}`,
-        position: at(x, y),
-        rotationDeg: y < 22 ? 0 : 180,
-      })),
-      { key: 'table.conference.14', label: 'Boardroom table', position: at(24, 21), rotationDeg: 90 },
-      ...Array.from({ length: 4 }, (_, i) => ({
-        key: 'chair.executive',
-        label: `Boardroom chair W${i + 1}`,
-        position: at(24 - AT_BOARD, 17.4 + i * 2.4),
-        rotationDeg: 270,
-      })),
-      ...Array.from({ length: 4 }, (_, i) => ({
-        key: 'chair.executive',
-        label: `Boardroom chair E${i + 1}`,
-        position: at(24 + AT_BOARD, 17.4 + i * 2.4),
-        rotationDeg: 90,
-      })),
-      { key: 'seating.sofa.3', label: 'Lounge sofa', position: at(24, 33.4), rotationDeg: 0 },
-      { key: 'table.coffee.1200', label: 'Lounge table', position: at(24, 29.8), rotationDeg: 0 },
-      { key: 'seating.lounge.chair', label: 'Lounge chair 1', position: at(20.4, 29.8), rotationDeg: 90 },
-      { key: 'seating.lounge.chair', label: 'Lounge chair 2', position: at(27.6, 29.8), rotationDeg: 270 },
-      { key: 'exhibit.plinth.1200', label: 'Corporate model', position: at(24, 11.4), rotationDeg: 0 },
-      { key: 'decor.planter.large', label: 'Planter', position: at(11.5, 26), rotationDeg: 0 },
-      { key: 'decor.planter.large', label: 'Planter', position: at(38.5, 26), rotationDeg: 0 },
+      // The open lounge, between the boardroom and the south offices.
+      { key: 'seating.sofa.3', label: 'Lounge sofa', position: at(25, 33.4), rotationDeg: 0 },
+      { key: 'table.coffee.1200', label: 'Lounge table', position: at(25, 29.8), rotationDeg: 0 },
+      { key: 'seating.lounge.chair', label: 'Lounge chair 1', position: at(21.5, 29.8), rotationDeg: 90 },
+      { key: 'seating.lounge.chair', label: 'Lounge chair 2', position: at(28.5, 29.8), rotationDeg: 270 },
+      { key: 'exhibit.plinth.1200', label: 'Corporate model', position: at(25, 8), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(23.5, 14.5), rotationDeg: 0 },
+      { key: 'decor.planter.large', label: 'Planter', position: at(26.5, 14.5), rotationDeg: 0 },
     ],
     rationale:
-      'THE OFFICES ARE FURNITURE, NOT ROOMS. The reference sheet draws four enclosed executive ' +
-      'offices with partitions; those partitions are not on the architect’s drawing, and adding them ' +
-      'would be adding architecture through the design layer, which this application does not allow ' +
-      'and should not. So the four desks are set out where the offices would be — two north, two ' +
-      'south — and the enclosure is a separate decision that has to go back into the model as new ' +
-      'construction. Say the word and I will add them there instead, marked as proposed.\n' +
-      'The boardroom takes the middle of the floor on the long axis, the lounge sits south of it, and ' +
-      'the whole floor is lit at 3000 K against 4000 K below, which is most of what makes an ' +
-      'executive floor feel like one.',
+      'What is left of the hall once the four suites and the boardroom are built inside it: the ' +
+      'circulation, and the open lounge between the boardroom and the southern offices. Marble on ' +
+      'the routes, warm plaster, and the whole floor lit at 3000 K against 4000 K below — the ' +
+      'colour temperature is most of what makes an executive floor feel like one, more than the ' +
+      'finishes are. The corporate model stands where you arrive from the lift, not tucked in a ' +
+      'corner.',
+  };
+}
+
+/** The four executive offices. Identical, because there is no reason to rank them. */
+function executiveOffice(n) {
+  const x = n === 1 || n === 3 ? 17.8 : 32.2;
+  // Measured from the wall the desk backs onto, not from the room's centre.
+  // Centring the desk left no run behind the chair for the cupboard: the chair
+  // finished 11.94 and the cupboard needed its centre at 12.68 in a room that
+  // ends at 13.2. Working from the back wall gives desk, chair and cupboard a
+  // place each, in that order.
+  const facingSouth = n <= 2;
+  const back = facingSouth ? 2.7 : 39.5;
+  const sign = facingSouth ? 1 : -1;
+  const y = back + sign * 3.1;
+  return {
+    name: `EXECUTIVE OFFICE ${n}`,
+    finishes: [
+      floor(FLOOR_SOFT, 'Carpet tile: quieter than the marble outside the door, which is the point of a private office.'),
+      wall(WALL_WARM),
+      featureWall(WALL_FEATURE, facingSouth ? 'north' : 'south', 'The wall behind the desk, clad.'),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    lighting: [
+      warmLight('recessed_downlight', 6, 12, 'Even, 3000 K, ~350 lux.'),
+      warmLight('cove', 2, 14, 'Cove over the desk wall.'),
+    ],
+    furniture: [
+      { key: 'desk.executive.1800', label: `Desk ${n}`, position: at(x, y), rotationDeg: facingSouth ? 0 : 180 },
+      { key: 'chair.executive', label: `Chair ${n}`, position: at(x, y + sign * AT_EXEC), rotationDeg: facingSouth ? 0 : 180 },
+    ],
+    rationale:
+      '73.5 sq ft, PROPOSED — the architect’s sheet shows one open hall here and these partitions ' +
+      'are new construction. Desk across the room with the clad wall behind it, its own washroom ' +
+      'against the outer wall and the door hung in the far corner so it does not swing into the ' +
+      'desk. No cupboard: at 7 ft wide, once the desk and its chair are in there is nowhere for one ' +
+      'that does not stand in the door. Carpet inside the door and marble outside it, which is the ' +
+      'difference you feel rather than see.',
+  };
+}
+
+/** The en-suite washrooms, one per office. */
+function execWash(n) {
+  return {
+    name: `EXEC WASH ${n}`,
+    finishes: [
+      floor(FLOOR_WET, 'Tiled.'),
+      dado(FLOOR_WET, 1500, 'Tiled to 1,500 mm.'),
+      wall(WALL_CALM),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    lighting: [warmLight('recessed_downlight', 2, 9, 'Two, in 20 sq ft.')],
+    furniture: [],
+    rationale: '20 sq ft en-suite, PROPOSED, opening off its own office. Not on the architect’s drawing.',
+  };
+}
+
+function boardroom() {
+  return {
+    name: 'BOARDROOM',
+    finishes: [
+      floor(FLOOR_SOFT, 'Carpet, for the acoustics a room of this size needs.'),
+      wall(WALL_WARM),
+      featureWall(WALL_FEATURE, 'east', 'The end wall the table addresses.'),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_coffered', materialId: CEILING_FLAT, dropHeight: 450 },
+    lighting: [
+      warmLight('pendant', 3, 40, 'Three over the table, which is what lights a boardroom.'),
+      warmLight('cove', 4, 18, 'Cove round the coffer.'),
+      warmLight('wall_washer', 3, 12, 'On the clad end wall.'),
+    ],
+    furniture: [
+      { key: 'table.conference.14', label: 'Boardroom table', position: at(26, 21), rotationDeg: 0 },
+      ...Array.from({ length: 4 }, (_, i) => ({
+        key: 'chair.executive',
+        label: `Boardroom chair N${i + 1}`,
+        position: at(21.5 + i * 3, 21 - AT_BOARD),
+        rotationDeg: 0,
+      })),
+      ...Array.from({ length: 4 }, (_, i) => ({
+        key: 'chair.executive',
+        label: `Boardroom chair S${i + 1}`,
+        position: at(21.5 + i * 3, 21 + AT_BOARD),
+        rotationDeg: 180,
+      })),
+      { key: 'display.screen.75', label: 'Boardroom screen', position: at(33.6, 21), rotationDeg: 90 },
+    ],
+    rationale:
+      '180 sq ft, PROPOSED, across the middle of the floor on the long axis so both halves of the ' +
+      'floor reach it equally. Fourteen-foot table, eight seats, screen on the clad end wall. ' +
+      'Carpet and a coffered ceiling because a hard room this size is unusable for a meeting.',
   };
 }
 
@@ -541,12 +604,21 @@ function skyGarden() {
         wall(WALL_FEATURE, 'The mumty walls, seen from the terrace.'),
         skirting(),
       ],
-      // THE CANOPY IS THE CEILING, and that is not a dodge — it is what a shade
-      // structure is. Drawn as furniture it was four 4 m bays standing ON the
-      // terrace, and the app's clearance validator was right to refuse it: an
-      // object with a 13'-1" square footprint sitting where the seating goes is
-      // a solid pavilion, not a piece of fabric 2.6 m over your head. Every item
-      // under it read as an overlap. A tensile panel is a stretch ceiling.
+      // FIBRE TENSILE, per the brief: the canopy is umbrella or fibre, nothing
+      // else. `stretch` is the ceiling kind that means a tensioned fabric
+      // membrane, which is exactly what this is.
+      //
+      // It is the terrace's CEILING and not furniture on it, and that is not a
+      // dodge — it is what a shade structure is. Drawn as furniture it was four
+      // 4 m bays standing ON the terrace, and the app's clearance validator was
+      // right to refuse it: an object with a 13'-1" square footprint sitting
+      // where the seating goes is a solid pavilion, not a piece of fabric 2.6 m
+      // over your head. Every item under it read as an overlap.
+      //
+      // NO MATERIAL ID. There is no fabric membrane in the material catalogue,
+      // and the nearest by colour would put the wrong trade and the wrong unit
+      // into the BOQ. The canopy is therefore described and NOT costed here —
+      // it needs a real line added to the catalogue before it can be.
       ceiling: { kind: 'stretch', dropHeight: 0 },
       lighting: [
         warmLight('bollard', 8, 8, 'Low level along the routes. Nothing above head height except the canopy uplights.'),
@@ -657,7 +729,15 @@ function boundingWallOnSide(room, floorData, side) {
 function specsForLevel(level) {
   const hall = { 1: gisHall, 2: satelliteHall, 3: dataCentreHall, 4: executiveHall }[level];
   if (!hall) return skyGarden();
-  return [...coreRooms({ kitchenIsPlant: level === 3 }), hall()];
+  const core = coreRooms({ kitchenIsPlant: level === 3 });
+  if (level !== 4) return [...core, hall()];
+  // Floor 4 is subdivided, so its hall is only what is left over.
+  return [
+    ...core,
+    hall(),
+    boardroom(),
+    ...[1, 2, 3, 4].flatMap((n) => [executiveOffice(n), execWash(n)]),
+  ];
 }
 
 /**

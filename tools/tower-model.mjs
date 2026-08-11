@@ -107,6 +107,7 @@ const FLOOR_TO_FLOOR = Math.round(11.75 * FT); // 11'-9", from the level tags
 
 const DRAWN = 'From the architect’s drawing. Unchanged.';
 const PROPOSED = 'Proposed partition. New construction, not on the architect’s drawing.';
+const PROPOSED_ROOM = 'Proposed. Formed by new partitions inside the drawn hall.';
 
 const wall = (x1, y1, x2, y2, thickness, fn, openings = [], drawn = true) => ({
   start: P(x1, y1),
@@ -130,15 +131,23 @@ const door = (alongFt, widthFt = 3, drawn = true) => ({
   note: drawn ? 'Doorway from the drawing.' : 'Proposed doorway.',
 });
 
-/** Four partitions round a proposed zone, with its door on the named side. */
-function enclose(x, y, w, d, side) {
+/**
+ * Four partitions round a proposed zone, with its door on the named side.
+ *
+ * `where` is the fraction along that wall the door sits at, 0.5 by default. It
+ * exists because a door in the middle of the long wall of a 7 ft office swings
+ * straight into the desk — the app's own validator refused all four offices for
+ * exactly that, and the fix is to hang the door in the corner, which is where a
+ * small office's door goes anyway.
+ */
+function enclose(x, y, w, d, side, where = 0.5) {
   const sides = {
     north: [x, y, x + w, y],
     south: [x, y + d, x + w, y + d],
     west: [x, y, x, y + d],
     east: [x + w, y, x + w, y + d],
   };
-  const doorAt = { north: w / 2, south: w / 2, west: d / 2, east: d / 2 };
+  const doorAt = { north: w * where, south: w * where, west: d * where, east: d * where };
   return Object.entries(sides).map(([name, [a, b, c, e]]) =>
     wall(a, b, c, e, PARTITION_MM, 'partition', name === side ? [door(doorAt[name], 3, false)] : [], false),
   );
@@ -153,6 +162,74 @@ function enclose(x, y, w, d, side) {
  * 5'-0" width the brief states and 7'-0" deep. Both partitions are new work.
  */
 const FEMALE_WASH = { x: 0.5, y: 14.5 - 7.2, w: 5, d: 7 };
+
+
+/**
+ * Floor 4's executive suites, which ARE on the reference design.
+ *
+ * The 2D and 3D sheets both draw them: four enclosed offices at the corners of
+ * the hall, each with its own washroom, a boardroom across the middle and an
+ * open lounge south of it. They are not on the ARCHITECT's drawing — that sheet
+ * shows one open hall — so every wall below is `inferred` and carries a note
+ * saying it is new construction, exactly as the basement's partitions do.
+ *
+ * The zones are 11'-0" x 10'-6" at each corner. Each is split: a 7'-0" wide
+ * office and a 4'-0" x 5'-0" en-suite against the outer wall, which is the only
+ * arrangement that fits a washroom in without making the office too narrow to
+ * put a desk across.
+ *
+ * All of it sits inside the hall's own outline and clear of the balcony recess
+ * at x 9'-10"..20'-4", y 40'-6"..45'-0".
+ */
+const EXEC_SUITES = [
+  // [office name, ox, oy, ow, od, en-suite name, sx, sy, sw, sd, office door side]
+  ['EXECUTIVE OFFICE 1', 14.3, 2.7, 7, 10.5, 'EXEC WASH 1', 10.3, 2.7, 4, 5, 'east'],
+  ['EXECUTIVE OFFICE 2', 28.7, 2.7, 7, 10.5, 'EXEC WASH 2', 35.7, 2.7, 4, 5, 'west'],
+  ['EXECUTIVE OFFICE 3', 14.3, 29, 7, 10.5, 'EXEC WASH 3', 10.3, 34.5, 4, 5, 'east'],
+  ['EXECUTIVE OFFICE 4', 28.7, 29, 7, 10.5, 'EXEC WASH 4', 35.7, 34.5, 4, 5, 'west'],
+];
+
+/** The boardroom, across the middle of the floor on the long axis. */
+const BOARDROOM = { x: 16, y: 16, w: 18, d: 10 };
+
+/** The rooms floor 4 adds inside its hall, and the partitions that make them. */
+function executiveSuites() {
+  const rooms = [];
+  const walls = [];
+  for (const [name, ox, oy, ow, od, wname, sx, sy, sw, sd, side] of EXEC_SUITES) {
+    rooms.push({
+      name,
+      use: 'executive_office',
+      boundary: rect(ox, oy, ow, od),
+      clearHeight: CLEAR,
+      confidence: 'inferred',
+      note: PROPOSED_ROOM,
+    });
+    rooms.push({
+      name: wname,
+      use: 'toilet',
+      boundary: rect(sx, sy, sw, sd),
+      clearHeight: CLEAR,
+      confidence: 'inferred',
+      note: PROPOSED_ROOM,
+    });
+    // Door in the far corner, clear of the desk: north-end offices hang theirs
+    // at the south end of the wall and vice versa.
+    walls.push(...enclose(ox, oy, ow, od, side, oy < 20 ? 0.88 : 0.12));
+    // The en-suite opens off its own office, so its door faces the office.
+    walls.push(...enclose(sx, sy, sw, sd, side === 'east' ? 'east' : 'west'));
+  }
+  rooms.push({
+    name: 'BOARDROOM',
+    use: 'conference',
+    boundary: rect(BOARDROOM.x, BOARDROOM.y, BOARDROOM.w, BOARDROOM.d),
+    clearHeight: CLEAR,
+    confidence: 'inferred',
+    note: PROPOSED_ROOM,
+  });
+  walls.push(...enclose(BOARDROOM.x, BOARDROOM.y, BOARDROOM.w, BOARDROOM.d, 'west', 0.2));
+  return { rooms, walls };
+}
 
 // ---------------------------------------------------------------------------
 // Storeys
@@ -229,6 +306,10 @@ function storey(n) {
 
   // The drawn BATH is now MALE WASH, so drop the duplicate from the core list.
   const deduped = rooms.filter((r) => r.name !== 'BATH');
+  // Floor 4 alone is subdivided. Its hall keeps its full outline — the suites
+  // sit inside it — so the schedule area does not change and the partitions are
+  // additions to the model rather than edits to it.
+  const suites = n === 4 ? executiveSuites() : { rooms: [], walls: [] };
 
   const walls = [
     // Shell, 40' x 45'.
@@ -251,8 +332,8 @@ function storey(n) {
     clearHeight: CLEAR,
     confidence: 'extracted',
     purpose,
-    rooms: deduped,
-    walls,
+    rooms: [...deduped, ...suites.rooms],
+    walls: [...walls, ...suites.walls],
   };
 }
 
