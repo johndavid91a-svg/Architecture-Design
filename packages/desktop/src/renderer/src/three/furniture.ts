@@ -724,6 +724,33 @@ const solarPanel: Builder = (w, h, d, look) => {
   return group;
 };
 
+
+/**
+ * A bay of the vertical louvre screen.
+ *
+ * The fins are drawn individually because that is the only thing that makes the
+ * screen read: a single panel at the bay's size is a wall, and the whole point
+ * of a fin screen is that you see between the members and the gap changes as you
+ * move past it. 3" x 4" members on the flat, at 9" centres.
+ */
+const louvreScreen: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const fin = makeMaterial(look.colour, 0.55, 0.15);
+  const FIN_W = 76.2;   // 3"
+  const FIN_D = 101.6;  // 4"
+  const pitch = 228.6;  // 9" centres
+  const count = Math.max(2, Math.round(w / pitch));
+  for (let i = 0; i < count; i++) {
+    const x = -w / 2 + ((i + 0.5) * w) / count;
+    group.add(slab(FIN_W, h, Math.min(FIN_D, d || FIN_D), x, h / 2, 0, fin));
+  }
+  // Head and sill rails the fins are fixed to.
+  const rail = makeMaterial(look.frame, 0.5, 0.3);
+  group.add(slab(w, 60, FIN_D, 0, 30, 0, rail));
+  group.add(slab(w, 60, FIN_D, 0, h - 30, 0, rail));
+  return group;
+};
+
 /**
  * Which builder suits a catalogue key.
  *
@@ -758,6 +785,7 @@ const BUILDERS: ReadonlyArray<readonly [RegExp, Builder]> = [
   [/^equipment\.console/, console3],
   [/^equipment\.ups|^equipment\.crac|^equipment\.condenser/, plantCabinet],
   [/^equipment\./, rack],
+  [/^outdoor\.louvre/, louvreScreen],
   [/^outdoor\.pergola/, pergola],
   [/^outdoor\.planter/, trough],
   [/^outdoor\.solar/, solarPanel],

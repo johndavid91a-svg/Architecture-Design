@@ -70,6 +70,7 @@ const CATALOGUE = {
   'decor.planter.large': { width: 600, depth: 600, height: 1400 },
   'counter.servery.3000': { width: 3000, depth: 700, height: 1050, clearanceFront: 900 },
   'seating.stool.bar': { width: 400, depth: 400, height: 750, clearanceFront: 450 },
+  'outdoor.louvre.screen': { width: 2900, depth: 102, height: 3350 },
   'outdoor.pergola.4x4': { width: 4000, depth: 4000, height: 2600 },
   'outdoor.planter.trough': { width: 1800, depth: 600, height: 700 },
   'outdoor.solar.panel': { width: 1700, depth: 1130, height: 40 },
@@ -252,7 +253,16 @@ function coreRooms({ kitchenIsPlant }) {
       finishes: [floor(FLOOR_DECK, 'External-grade paving. Not the internal floor finish.'), wall(WALL_FEATURE), skirting()],
       ceiling: { kind: 'none' },
       lighting: [warmLight('linear_led', 1, 14, 'A single run at the threshold.')],
-      furniture: [],
+      furniture: [
+        // The M.S fin screen, just inboard of the balcony's front wall face.
+        // On the real building it is fixed TO that face; the model has no way to
+        // place an item outside a room, so it stands 3" clear of the 9" wall
+        // rather than passing through it — which the validator caught.
+        // 3" x 4" members per
+        // the FRONT ELEVATION — the floor plans say 2" x 4" and the two sheets
+        // disagree; the elevation is the one being followed.
+        { key: 'outdoor.louvre.screen', label: 'M.S louvre screen', position: at(15.4, 44.35), rotationDeg: 0 },
+      ],
       rationale:
         'Labelled on the sheet and dimensioned on none of them — 10\'-6" x 4\'-6" is measured off ' +
         'the line work and must be confirmed. Left empty: on floor 3 it carries the cooling ' +

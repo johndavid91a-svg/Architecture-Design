@@ -95,6 +95,36 @@ function hallBoundary() {
   ].reverse();
 }
 
+
+/**
+ * The front elevation, composed from the plan itself.
+ *
+ * The plan divides the 40 ft frontage into three and they add to it exactly:
+ *
+ *   x  0'-0" .. 9'-10"   solid    the core strip — stair, lift, bath
+ *   x  9'-10" .. 20'-4"  louvred  the balcony bay, behind the M.S fin screen
+ *   x 20'-4" .. 40'-0"   glazed   the hall's front
+ *
+ * That is the left pier, the fin screen and the glass in the site photograph, in
+ * that order, and it is why the composition needed no guessing: it was already
+ * in the floor plan.
+ *
+ * The south wall is drawn from (40,45) to (0,45), so distance along it runs FROM
+ * the east corner — the glazed run starts at 0 and is 19'-8" long.
+ */
+const GLAZED_W = 40 - (20 + 4 / 12);
+
+/** A glazed opening across the hall's front, for one storey. */
+const frontGlazing = (heightFt, sillFt) => ({
+  kind: 'window',
+  distanceAlongWall: Math.round((GLAZED_W / 2) * FT),
+  width: Math.round(GLAZED_W * FT),
+  height: Math.round(heightFt * FT),
+  sillHeight: Math.round(sillFt * FT),
+  confidence: 'extracted',
+  note: 'Glazing to the hall front. The FRONT ELEVATION sheet labels eleven GLASS panels; this is the run they divide.',
+});
+
 // ---------------------------------------------------------------------------
 // Walls
 // ---------------------------------------------------------------------------
@@ -331,7 +361,7 @@ function storey(n) {
     // Shell, 40' x 45'.
     wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
     wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
-    wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior'),
+    wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [frontGlazing(9, 1)]),
     wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
     // The spine between the core strip and the hall, open where the stair lands.
     wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
@@ -498,8 +528,12 @@ export function groundFloor() {
     walls: [
       wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
       wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
-      // The entrance, on the front (south) elevation.
-      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [door(24, 8)]),
+      // The entrance, in the GLAZED run — not in the balcony bay, which is where
+      // it was and where there is a fin screen in front of it.
+      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [
+        door(GLAZED_W / 2, 8),
+        frontGlazing(16, 2.5),
+      ]),
       wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
       wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
       wall(CORE_W, 18.5, CORE_W, 45, EXTERIOR_MM, 'interior', [door(21.5, 3.5)]),
@@ -557,7 +591,7 @@ export function mezzanineFloor() {
     walls: [
       wall(0, 0, 40, 0, EXTERIOR_MM, 'exterior'),
       wall(40, 0, 40, 45, EXTERIOR_MM, 'exterior'),
-      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior'),
+      wall(40, 45, 0, 45, EXTERIOR_MM, 'exterior', [frontGlazing(7, 1)]),
       wall(0, 45, 0, 0, EXTERIOR_MM, 'exterior'),
       wall(CORE_W, 0, CORE_W, 14.5, EXTERIOR_MM, 'interior'),
       // The mezzanine's open edge onto the void. A guard, not a wall.

@@ -415,6 +415,20 @@ export const FURNITURE: readonly FurnitureItem[] = [
     note: 'The outdoor half of a precision cooling split. It needs air on all four sides and above, not just in front — the clearance field can only express one face, so the layout has to hold the rest by hand. Capacity is not stated: it depends on the load, and the load depends on what goes in the racks.',
   },
   {
+    key: 'outdoor.louvre.screen',
+    name: 'M.S louvre screen bay, 3\" x 4\" fins',
+    category: 'outdoor',
+    // 2,900 and not the balcony's full 3,200: a bay has to land between the
+    // WALL FACES, and a 9" wall each side eats 229 of the opening. A screen
+    // drawn at the structural width passes into the reveal it is fixed to.
+    width: 2900,
+    depth: 102,
+    height: 3350,
+    styles: ['contemporary.office', 'technical.workstation'],
+    placeholderColorHex: '#b9a88c',
+    note: 'One bay of the vertical fin screen: 3\" x 4\" mild steel members at roughly 9\" centres, 14 to a bay. The FLOOR PLANS call the same screen 2\" x 4\"; the FRONT ELEVATION calls it 3\" x 4\" and the elevation is the sheet being followed. No clearance — it is a facade element on the balcony face, not something standing on the floor.',
+  },
+  {
     key: 'outdoor.pergola.4x4',
     name: 'Shade canopy bay, 4 m x 4 m',
     category: 'outdoor',
