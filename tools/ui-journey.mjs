@@ -18,6 +18,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { buildIndex, installViaDesignTab, serve } from './lib/scheme-design.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..', 'packages', 'desktop');
 // Electron puts its own flags and this script into argv, so the output
@@ -64,21 +66,9 @@ const schemePath = schemeFlag >= 0 ? resolve(process.argv[schemeFlag + 1]) : nul
  * `basement-design.mjs` — or from an explicit `--design`. Without one, the
  * journey behaves exactly as it did before.
  *
- * A design cannot travel with the floors: `RoomId`s are minted inside
- * `materialise()` in the RENDERER, so nothing written on disk can name one. The
- * design is therefore installed AFTER the building is created, through the app's
- * own AI Interior Designer channel — the harness answers `ai:call` with the
- * scheme's room design instead of calling a model. That is deliberately the
- * least privileged route available: every proposal still goes through
- * `validateInteriorProposal`, so the app's real clearance validator gets a veto
- * over the layout and a room that does not fit is rejected on screen.
- *
- * The channel is lossy in two known ways, both better said than discovered:
- * a proposal carries no `wallId`, so a finish meant for one wall installs
- * unrestricted and the feature wall loses its restriction; and the agent writes
- * room designs INTO the design that is already open, so the scheme's own design
- * name, label and rationale do not travel — the active design keeps the name it
- * had and its origin becomes `ai`.
+ * How it is installed, and why it cannot simply be handed over, is in
+ * `lib/scheme-design.mjs` — which is where the machinery now lives, because
+ * `walk-storeys.mjs` needs the same thing and had a `--design` flag it ignored.
  */
 const designFlag = process.argv.indexOf('--design');
 const designPath = designFlag >= 0 ? resolve(process.argv[designFlag + 1]) : null;
@@ -108,151 +98,6 @@ const CHECK = `(function (text, on) {
   return { ok: true, checked: box.checked };
 })`;
 
-/** Set a React-controlled field and let React hear about it. */
-const SET_FIELD = `(function (id, value, eventName) {
-  const node = document.getElementById(id);
-  if (!node) return { ok: false, why: 'no field ' + id };
-  const proto = node instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLTextAreaElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, 'value').set.call(node, value);
-  node.dispatchEvent(new Event(eventName, { bubbles: true }));
-  return { ok: true };
-})`;
-
-/** The rooms the Design tab offers, in the order it offers them. */
-const ROOM_OPTIONS = `(function () {
-  const sel = document.getElementById('dv-room');
-  if (!sel) return { ok: false, why: 'the Design tab has no room selector' };
-  return { ok: true, options: [...sel.options].map((o) => ({ value: o.value, label: o.textContent.trim() })) };
-})`;
-
-/** The agent's transcript for the room just run. */
-const TRANSCRIPT = `(function () {
-  const lines = [...document.querySelectorAll('.card .small.mono')].map((n) => n.textContent.trim());
-  return { ok: lines.some((l) => l.startsWith('Accepted')), lines };
-})`;
-
-/**
- * Name plus bounding box: enough to know which room a prompt is about.
- *
- * The prompt carries the room's id, but that id was minted in the renderer and
- * the harness has never seen it. The name is not unique on this floor (there are
- * two `M.H`), and the boundary is identical between two runs of `materialise`
- * over the same drawing — so the two together identify a room without the
- * harness having to assume the click order matched the answer order.
- */
-const roomSignature = (name, points) => {
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
-  return (
-    `${name}@${Math.round(Math.min(...xs))},${Math.round(Math.min(...ys))},` +
-    `${Math.round(Math.max(...xs))},${Math.round(Math.max(...ys))}`
-  );
-};
-
-/** One `RoomDesign` as the interior agent's response schema states it. */
-const asProposal = (rd) => ({
-  rationale: rd.rationale,
-  finishes: rd.finishes.map((f) => ({
-    surface: f.surface,
-    materialId: f.materialId,
-    heightLimitMm: f.heightLimit,
-    note: f.note,
-  })),
-  ceiling: { kind: rd.ceiling.kind, materialId: rd.ceiling.materialId, dropHeightMm: rd.ceiling.dropHeight },
-  lighting: rd.lighting.map((l) => ({
-    kind: l.kind,
-    count: l.count,
-    wattsEach: l.wattsEach,
-    colourTemperatureK: l.colourTemperatureK,
-  })),
-  furniture: rd.furniture.map((f) => ({
-    catalogueKey: f.catalogueKey,
-    label: f.label,
-    x: f.position.x,
-    y: f.position.y,
-    rotationDeg: f.rotationDeg,
-  })),
-});
-
-/**
- * Build the scheme's design and index it by room, ready to answer `ai:call`.
- *
- * `materialise` is run here as well as in the renderer, over the same floors, so
- * the design can be built against real rooms. The ids differ between the two
- * runs and are never used; the geometry does not, and that is what is matched on.
- */
-async function schemeDesignByRoom(scheme) {
-  const source = designPath ?? schemePath.replace(/-model\.mjs$/, '-design.mjs');
-  const builder =
-    scheme.basementDesign ??
-    (await import(pathToFileURL(source).href).then(
-      (m) => m.basementDesign ?? m.design ?? m.default,
-      () => null,
-    ));
-  if (typeof builder !== 'function') return null;
-
-  // The builder needs materialised rooms, so it needs the built core. Say which
-  // build is missing rather than dying on a module-not-found stack: a harness
-  // that fails for an obvious reason obscurely wastes more time than the run.
-  const core = await import(
-    pathToFileURL(join(here, '..', 'packages', 'core', 'dist', 'index.js')).href
-  ).catch((error) => {
-    step(`a design was found at ${source} but @adp/core is not built (run: npm run build:core)`, {
-      ok: false,
-      error: error.message,
-    });
-    return null;
-  });
-  if (!core) return null;
-  const built = core.materialise(
-    {
-      name: 'Scheme',
-      buildingType: 'commercial_plaza',
-      location: { city: 'Islamabad', country: 'Pakistan', authority: 'CDA' },
-      displayUnit: 'ft',
-      // A scheme may be one storey or a whole stack. `floors()` is the general
-      // form; `basementFloor()` is kept because the basement scheme predates it.
-      floors: scheme.floors ? scheme.floors() : [scheme.basementFloor()],
-    },
-    new Date().toISOString(),
-  );
-  const floors = built.project.architecture.site.buildings.flatMap((b) => b.floors);
-  const rooms = new Map(floors.flatMap((f) => f.rooms).map((r) => [r.id, r]));
-  const unmatched = [];
-  const design = builder(floors, {
-    projectId: built.project.id,
-    createdAt: new Date().toISOString(),
-    onUnmatched: (names) => unmatched.push(...names),
-  });
-
-  const byRoom = new Map();
-  for (const fd of design.floors) {
-    for (const rd of fd.rooms) {
-      const room = rooms.get(rd.roomId);
-      if (!room) continue;
-      // A QUEUE per signature, not a single entry.
-      //
-      // Every storey of this tower has a room called HALL with an IDENTICAL 2D
-      // boundary — only the elevation differs, and a boundary is 2D. So the
-      // signature collides four ways, and a Map keyed on it kept the last
-      // design and served it for all four floors: the GIS floor, the imagery
-      // floor and the data centre all came out as the executive floor, which
-      // looked plausible and was completely wrong.
-      //
-      // The prompt the app sends carries the room's name and boundary and
-      // nothing else that separates them — its RoomId was minted in the
-      // renderer and this process has never seen it. What IS shared is ORDER:
-      // both sides walk floors in the same sequence, so the Nth request for a
-      // colliding signature is the Nth design for it.
-      const key = roomSignature(room.name, room.boundary);
-      const queue = byRoom.get(key);
-      if (queue) queue.push({ name: room.name, proposal: asProposal(rd) });
-      else byRoom.set(key, [{ name: room.name, proposal: asProposal(rd) }]);
-    }
-  }
-  return { byRoom, unmatched, source: scheme.basementDesign ? schemePath : source, name: design.name };
-}
-
 let failures = 0;
 const step = (label, result) => {
   const ok = result && result.ok !== false;
@@ -263,8 +108,8 @@ const step = (label, result) => {
 
 /** The scheme's design, indexed by room, and which rooms it was asked for. */
 let schemeDesign = null;
-const servedRooms = [];
-const refusedRooms = [];
+let servedRooms = [];
+let refusedRooms = [];
 
 async function main() {
   await mkdir(outDir, { recursive: true });
@@ -286,48 +131,23 @@ async function main() {
     ipcMain.handle('import:drawingSheets', async () => []);
     ipcMain.handle('import:drawingSheet', async () => ({ error: 'no sheets' }));
 
-    schemeDesign = await schemeDesignByRoom(scheme);
+    schemeDesign = await buildIndex({
+      schemePath,
+      designPath,
+      coreDist: join(here, '..', 'packages', 'core', 'dist', 'index.js'),
+      onError: (message, error) => step(message, { ok: false, error: error.message }),
+    });
     if (schemeDesign) {
       console.log(
         `        design "${schemeDesign.name}" from ${schemeDesign.source}: ` +
-          `${schemeDesign.byRoom.size} room(s)` +
+          `${schemeDesign.count} room(s)` +
           (schemeDesign.unmatched.length > 0
             ? `, ${schemeDesign.unmatched.length} named space(s) with no room (${schemeDesign.unmatched.join(', ')})`
             : ''),
       );
-      // The key is never read: the harness answers `ai:call` itself and no
-      // request leaves this machine. Saying "Ready" is what un-disables the
-      // button the design is installed through.
-      ipcMain.handle('ai:status', async () => ({
-        configured: true,
-        keyLocation: 'not used — answered by tools/ui-journey.mjs',
-        model: 'scheme-design (harness, not a model)',
-      }));
-      ipcMain.handle('ai:call', async (_event, request) => {
-        const name = /ROOM: "([^"]+)"/.exec(request.user)?.[1];
-        const boundary = /Boundary \(mm, plan coordinates\): (.+)/.exec(request.user)?.[1] ?? '';
-        const points = [...boundary.matchAll(/\((-?[\d.]+), (-?[\d.]+)\)/g)].map((m) => ({
-          x: Number(m[1]),
-          y: Number(m[2]),
-        }));
-        // Take the next design for this signature. `shift()` is what makes the
-        // Nth identical HALL get the Nth floor's design rather than the last.
-        const queue = name && points.length > 0 ? schemeDesign.byRoom.get(roomSignature(name, points)) : null;
-        const held = queue && queue.length > 0 ? queue.shift() : null;
-        if (!held) {
-          // Refusing beats guessing: answering with somebody else's room would
-          // install a design that fits and is wrong.
-          refusedRooms.push(name ?? '(unnamed)');
-          return { ok: false, reason: 'no_design', detail: `The scheme holds no design for "${name}".` };
-        }
-        servedRooms.push(held.name);
-        return {
-          ok: true,
-          text: JSON.stringify(held.proposal),
-          model: 'tools/basement-design.mjs (harness, not a model)',
-          stopReason: 'end_turn',
-        };
-      });
+      const channel = serve(ipcMain, schemeDesign);
+      servedRooms = channel.served;
+      refusedRooms = channel.refused;
     }
   } else if (pdfPath) {
     const drawing = await import(
@@ -408,7 +228,11 @@ async function main() {
   step('the Drawings tab opens', await run(CLICK, 'nav button', 'Drawings'));
   await wait(pdfPath ? 25_000 : 600);
   await shot(pdfPath ? 'drawings-sheet' : 'drawings-empty');
-  if (!pdfPath) {
+  if (!pdfPath && !schemePath) {
+    // Only when nothing was imported. A scheme run has a drawing attached by
+    // this point — it is what built the building three steps ago — so asking
+    // for the empty state here failed every scheme run for a reason that had
+    // nothing to do with what the run was checking.
     const emptyText = await win.webContents.executeJavaScript(
       `(document.querySelector('.list-empty')?.textContent || '').trim()`,
     );
@@ -416,13 +240,15 @@ async function main() {
       ok: /no drawing is attached/i.test(emptyText),
       saw: emptyText.slice(0, 120),
     });
-  } else {
+  } else if (pdfPath) {
     const shown = await win.webContents.executeJavaScript(
       `(document.querySelector('.overlay.bl')?.textContent || '').trim()`,
     );
     console.log(`        ${shown.replace(/\s+/g, ' ').slice(0, 160)}`);
     step('it draws a sheet from the set', { ok: /line\(s\)/i.test(shown), saw: shown.slice(0, 120) });
   }
+  // A scheme has floors but no sheets — there is no PDF behind it to draw — so
+  // there is nothing to assert on this tab either way.
 
   // ---- 2D plan -----------------------------------------------------------
   step('the 2D Plan tab opens', await run(CLICK, 'nav button', '2D Plan'));
@@ -457,38 +283,23 @@ async function main() {
   // by room, so the last thing the 3D tab sees is the design the building was
   // actually drawn for.
   if (schemeDesign) {
+    const result = await installViaDesignTab({
+      run,
+      wait,
+      index: schemeDesign,
+      refused: refusedRooms,
+      // A room the scheme does not cover is a skip and says so. A room it does
+      // cover but the app rejected is a failure of this journey, so it goes
+      // through `step` and counts against the run.
+      log: (line) =>
+        /^\s*REJECTED /.test(line)
+          ? step(line.trim(), { ok: false })
+          : console.log(`      ${line.trim()}`),
+    });
+    step(`the Design tab lists the building's rooms (${result.offered})`, { ok: result.offered > 0 });
     step(
-      'the design agent is offered a way to run',
-      await run(SET_FIELD, 'dv-instr', `Install the agreed basement scheme, from ${schemeDesign.source}.`, 'input'),
-    );
-    const listed = await run(ROOM_OPTIONS);
-    step(`the Design tab lists the building's rooms (${listed.options?.length ?? 0})`, listed);
-
-    let installed = 0;
-    for (const option of listed.options ?? []) {
-      await run(SET_FIELD, 'dv-room', option.value, 'change');
-      await wait(120);
-      await run(CLICK, 'button', 'Run AI Interior Designer');
-      await wait(500);
-      const transcript = await run(TRANSCRIPT);
-      // "Basement — GAMES FLOOR (WEST) (125 sq ft)" is the label; the area is
-      // what has to come off, not everything after the first bracket.
-      const room = option.label.replace(/^.*? — /, '').replace(/\s*\([\d,]+ sq ft\)$/, '');
-      if (transcript.ok) {
-        installed++;
-      } else {
-        // A room the scheme does not cover is a skip and says so. A room it does
-        // cover but the app rejected is a failure, and the reason is on screen.
-        if (refusedRooms.includes(room)) {
-          console.log(`        skipped ${room} — the scheme holds no design for it`);
-        } else {
-          step(`the scheme's design for ${room} is accepted`, { ok: false, saw: transcript.lines.slice(-2) });
-        }
-      }
-    }
-    step(
-      `the scheme's own design is installed (${installed} of ${schemeDesign.byRoom.size} room(s))`,
-      { ok: installed === schemeDesign.byRoom.size, served: servedRooms.length, refused: refusedRooms },
+      `the scheme's own design is installed (${result.installed} of ${schemeDesign.count} room(s))`,
+      { ok: result.installed === schemeDesign.count, served: servedRooms.length, refused: refusedRooms },
     );
     await wait(400);
     await shot('design-scheme');

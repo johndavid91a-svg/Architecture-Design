@@ -132,6 +132,10 @@ from it. Recorded as a defect, not patched over.
 - **The lift pit at EL. -15'-0"**, named on section A-A and not modelled.
 - **The rear elevation's openings.** 7'-9" wide between 4'-0" piers, on every
   storey, and the model's rear wall is solid at all of them.
-- **Sections B-B to D-D and the structural grid sheets** are read but unused.
-  A-A and the rear elevation have now been used; between them and the front
-  elevation, three independent sheets confirm all ten levels.
+- **Sections B-B to D-D and the structural grid sheets** (pages 51, 52, 54,
+  14–21). These are in the same drawing PDF. The PDF is not in the repository
+  — it is the original client file — so the content from these pages cannot
+  be re-read here. The building model was built from the floor plans and the
+  front elevation; Sections B-B to D-D would confirm or correct cross-section
+  dimensions, stair widths and slab details. The structural grid pages would
+  give column positions and grid spacings that are inferred but not read.

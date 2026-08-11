@@ -17,9 +17,11 @@
  * gets anywhere near a photograph. Inspecting a building is its own job and
  * should cost what it costs and nothing more.
  *
- * IT PHOTOGRAPHS ARCHITECTURE, NOT DESIGN. Installing a design means driving the
- * app's designer channel, which `ui-journey.mjs` does; until that is shared
- * between them, passing --design here is refused rather than ignored.
+ * IT PHOTOGRAPHS THE DESIGN TOO, when given one. `--design` was accepted and
+ * ignored here for a while, and the first full run produced seven storeys of
+ * bare architecture with the design path printed above them. The machinery that
+ * installs a design lived in `ui-journey.mjs` and nowhere else; it now lives in
+ * `lib/scheme-design.mjs` and both harnesses use it.
  *
  * WHAT IT DOES. For each storey, in order: isolate it, orbit it through several
  * bearings, then stand inside it at the stair and at the entrance. Everything it
@@ -32,6 +34,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { buildIndex, installViaDesignTab, serve } from './lib/scheme-design.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..', 'packages', 'desktop');
 
@@ -41,6 +45,8 @@ const arg = (flag) => {
 };
 const schemePath = arg('--scheme') ? resolve(arg('--scheme')) : null;
 const designPath = arg('--design') ? resolve(arg('--design')) : null;
+/** Which ground-floor concept to install, for a design that offers a choice. */
+const concept = arg('--concept');
 /** How many bearings to orbit each storey through. */
 const ANGLES = Number(arg('--angles') ?? 3);
 const outDir = resolve(
@@ -94,6 +100,10 @@ const FLOOR_LABELS = `(function () {
 
 const STATUS = `((document.querySelector('.overlay.bl') || {}).textContent || '')`;
 
+/** The scheme's design indexed by room, and the rooms it holds nothing for. */
+let index = null;
+let refused = [];
+
 async function main() {
   await mkdir(outDir, { recursive: true });
 
@@ -112,7 +122,35 @@ async function main() {
       sheets: [],
     }));
   }
-  ipcMain.handle('ai:status', async () => ({ configured: false }));
+
+  // The design is built before the window opens, so a scheme with no design —
+  // or a core that has not been built — is reported now rather than after four
+  // minutes of photographing the wrong building.
+  if (designPath) {
+    index = await buildIndex({
+      schemePath,
+      designPath,
+      concept,
+      coreDist: join(here, '..', 'packages', 'core', 'dist', 'index.js'),
+      onError: (message, error) => console.error(`  FAIL ${message} — ${error.message}`),
+    });
+    if (!index) {
+      console.error(
+        `\n  no design could be built from ${designPath}.\n` +
+          '  Drop --design to photograph the architecture alone.\n',
+      );
+      app.exit(2);
+      return;
+    }
+    console.log(
+      `  design "${index.name}" from ${index.source}: ${index.count} room design(s)` +
+        (index.unmatched.length > 0 ? `, ${index.unmatched.length} unmatched` : ''),
+    );
+    for (const miss of index.unmatched) console.log(`    unmatched: ${miss}`);
+    ({ refused } = serve(ipcMain, index));
+  } else {
+    ipcMain.handle('ai:status', async () => ({ configured: false }));
+  }
 
   const win = new BrowserWindow({
     width: 1600,
@@ -151,26 +189,25 @@ async function main() {
   await run(CLICK, 'button', 'Use this as the building');
   await wait(1500);
 
-  if (designPath) {
-    // REFUSE, do not pretend.
-    //
-    // This tool accepted --design and then did nothing with it, so the first
-    // full run photographed seven storeys of bare architecture while the status
-    // line read "0 furniture item(s)" and every caption claimed a design was
-    // loaded. A flag that is accepted and ignored is worse than one that does
-    // not exist: it produces a plausible, complete, wrong answer.
-    //
-    // Installing a design means driving the app's designer channel, which
-    // ui-journey.mjs already does. Until that is shared between the two, this
-    // says so and stops.
-    console.error(
-      '\n  --design is not implemented here yet.\n' +
-        '  A design is installed through the app\'s designer channel, which\n' +
-        '  tools/ui-journey.mjs drives. Use that with --inspect for a designed\n' +
-        '  building, or drop --design to photograph the architecture alone.\n',
-    );
-    app.exit(2);
-    return;
+  // ---- Install the design, room by room, through the app's own channel ----
+  if (index) {
+    await run(CLICK, 'nav button', 'Design');
+    await wait(1200);
+    const installed = await installViaDesignTab({
+      run,
+      wait,
+      index,
+      refused,
+      log: (line) => console.log(line),
+    });
+    console.log(`  installed ${installed.installed} of ${installed.offered} room(s) offered`);
+    if (installed.installed === 0) {
+      // Zero installs with a design in hand is the failure this whole exercise
+      // exists to catch: the photographs would come out bare and look fine.
+      console.error('\n  the design installed nothing — refusing to photograph bare architecture\n');
+      app.exit(3);
+      return;
+    }
   }
 
   await run(CLICK, 'nav button', '3D');
@@ -229,12 +266,12 @@ async function main() {
   }
 
   // ---- An index, so the set can be read rather than guessed at ------------
-  const index =
+  const contents =
     `# Storey walk\n\n${status}\n\n` +
     `${shots.length} photograph(s), ${floors.labels.length} storey(s), ${ANGLES} bearing(s) each.\n\n` +
     shots.map((s) => `- **${s.name}** — ${s.caption}`).join('\n') +
     `\n\nEvery control driven here is a real control in the real renderer.\n`;
-  await writeFile(join(outDir, 'index.md'), index);
+  await writeFile(join(outDir, 'index.md'), contents);
 
   console.log(`\n${shots.length} photograph(s) in ${outDir}`);
   app.quit();
