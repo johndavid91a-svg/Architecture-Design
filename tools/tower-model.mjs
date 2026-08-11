@@ -306,6 +306,53 @@ function executiveSuites() {
 /** Level tags, in feet, read from each sheet. */
 export const LEVELS = { 1: 21.25, 2: 33, 3: 44.75, 4: 56.5, mumty: 68.25 };
 
+
+/**
+ * The manager's office and its washroom, on floors 1 to 3.
+ *
+ * Item 5 on each of those floors' legends is an ATTACHED WASHROOM beside the
+ * Manager / Executive Office, and neither existed here: the manager was a desk
+ * standing in the open hall. Same geometry as floor 4's south-east suite, on
+ * purpose — one office at 73.5 sq ft and one 20 sq ft en-suite against the outer
+ * wall, so the four managers in this building get the same room whatever floor
+ * they sit on.
+ *
+ * New construction. The architect's sheet shows one open hall on every one of
+ * these storeys, so every wall below is `inferred` and says so.
+ */
+const MANAGER = { x: 28.7, y: 29, w: 7, d: 10.5 };
+const MANAGER_WASH = { x: 35.7, y: 34.5, w: 4, d: 5 };
+
+function managerSuite() {
+  return {
+    rooms: [
+      {
+        name: 'MANAGER OFFICE',
+        use: 'executive_office',
+        boundary: rect(MANAGER.x, MANAGER.y, MANAGER.w, MANAGER.d),
+        clearHeight: CLEAR,
+        confidence: 'inferred',
+        note: PROPOSED_ROOM,
+      },
+      {
+        name: 'MANAGER WASH',
+        use: 'toilet',
+        boundary: rect(MANAGER_WASH.x, MANAGER_WASH.y, MANAGER_WASH.w, MANAGER_WASH.d),
+        clearHeight: CLEAR,
+        confidence: 'inferred',
+        note: PROPOSED_ROOM,
+      },
+    ],
+    walls: [
+      // Door in the far corner, clear of the desk — the same lesson floor 4's
+      // offices taught: a door in the middle of a 7 ft office's long wall swings
+      // straight into it.
+      ...enclose(MANAGER.x, MANAGER.y, MANAGER.w, MANAGER.d, 'west', 0.12),
+      ...enclose(MANAGER_WASH.x, MANAGER_WASH.y, MANAGER_WASH.w, MANAGER_WASH.d, 'west'),
+    ],
+  };
+}
+
 /**
  * Floor 3 takes the plant, floor 4 takes the en-suite.
  *
@@ -377,7 +424,7 @@ function storey(n) {
   // Floor 4 alone is subdivided. Its hall keeps its full outline — the suites
   // sit inside it — so the schedule area does not change and the partitions are
   // additions to the model rather than edits to it.
-  const suites = n === 4 ? executiveSuites() : { rooms: [], walls: [] };
+  const suites = n === 4 ? executiveSuites() : managerSuite();
 
   const walls = [
     // Shell, 40' x 45'.

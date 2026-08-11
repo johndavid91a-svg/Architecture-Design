@@ -358,14 +358,13 @@ function gisHall() {
     furniture: [
       ...workstationBank(13.2, 6.5, 4, 2),
       { key: 'display.videowall.3x2', label: 'GIS map display wall', position: at(38.6, 16), rotationDeg: 90 },
-      { key: 'exhibit.model.terrain', label: 'Terrain / GIS physical model', position: at(26, 33), rotationDeg: 0 },
+      // West of the manager's office, which now occupies x 28'-8" to 35'-8".
+      { key: 'exhibit.model.terrain', label: 'Terrain / GIS physical model', position: at(23.5, 33), rotationDeg: 0 },
       { key: 'table.conference.8', label: 'Meeting table', position: at(14.5, 30.5), rotationDeg: 0 },
       { key: 'chair.task', label: 'Meeting chair 1', position: at(13.2, 30.5 - AT_MEETING), rotationDeg: 0 },
       { key: 'chair.task', label: 'Meeting chair 2', position: at(15.8, 30.5 - AT_MEETING), rotationDeg: 0 },
       { key: 'chair.task', label: 'Meeting chair 3', position: at(13.2, 30.5 + AT_MEETING), rotationDeg: 180 },
       { key: 'chair.task', label: 'Meeting chair 4', position: at(15.8, 30.5 + AT_MEETING), rotationDeg: 180 },
-      { key: 'desk.executive.1800', label: 'Manager’s desk', position: at(35, 37), rotationDeg: 180 },
-      { key: 'chair.executive', label: 'Manager’s chair', position: at(35, 39.8), rotationDeg: 180 },
       { key: 'decor.planter.large', label: 'Planter', position: at(38.5, 30), rotationDeg: 0 },
       { key: 'decor.planter.large', label: 'Planter', position: at(38.5, 33), rotationDeg: 0 },
     ],
@@ -398,11 +397,9 @@ function satelliteHall() {
     furniture: [
       ...workstationBank(13.2, 6.5, 4, 2),
       { key: 'display.videowall.3x2', label: 'Earth / satellite imagery wall', position: at(38.6, 16), rotationDeg: 90 },
-      { key: 'exhibit.plinth.1200', label: 'Globe on plinth', position: at(22, 31), rotationDeg: 0 },
-      { key: 'exhibit.plinth.1200', label: 'Satellite model on plinth', position: at(28, 31), rotationDeg: 0 },
+      { key: 'exhibit.plinth.1200', label: 'Globe on plinth', position: at(20, 31), rotationDeg: 0 },
+      { key: 'exhibit.plinth.1200', label: 'Satellite model on plinth', position: at(25, 31), rotationDeg: 0 },
       { key: 'display.screen.75', label: 'Secondary display', position: at(38.6, 30), rotationDeg: 90 },
-      { key: 'desk.executive.1800', label: 'Manager’s desk', position: at(35, 37), rotationDeg: 180 },
-      { key: 'chair.executive', label: 'Manager’s chair', position: at(35, 39.8), rotationDeg: 180 },
       { key: 'decor.planter.large', label: 'Planter', position: at(38.5, 6), rotationDeg: 0 },
     ],
     rationale:
@@ -451,8 +448,6 @@ function dataCentreHall() {
       { key: 'display.videowall.3x2', label: 'Status wall', position: at(38.6, 27), rotationDeg: 90 },
       { key: 'equipment.crac.unit', label: 'Cooling unit 1', position: at(37, 8), rotationDeg: 90 },
       { key: 'equipment.crac.unit', label: 'Cooling unit 2', position: at(37, 15), rotationDeg: 90 },
-      { key: 'desk.executive.1800', label: 'Manager’s desk', position: at(35, 37), rotationDeg: 180 },
-      { key: 'chair.executive', label: 'Manager’s chair', position: at(35, 39.8), rotationDeg: 180 },
     ],
     rationale:
       'FOURTEEN RACKS, IN TWO ROWS OF SEVEN WITH A HOT AISLE BETWEEN THEM — the count on the ' +
@@ -881,7 +876,7 @@ function specsForLevel(level, concept = 'lounge') {
   const hall = { 1: gisHall, 2: satelliteHall, 3: dataCentreHall, 4: executiveHall }[level];
   if (!hall) return skyGarden();
   const core = coreRooms({ kitchenIsPlant: level === 3 });
-  if (level !== 4) return [...core, hall()];
+  if (level !== 4) return [...core, hall(), managerOffice(), managerWash()];
   // Floor 4 is subdivided, so its hall is only what is left over.
   return [
     ...core,
@@ -897,6 +892,58 @@ function specsForLevel(level, concept = 'lounge') {
  * `floors` must already carry room ids and recomputed `boundingWallIds`: a
  * feature wall is resolved to a real `WallId` here.
  */
+
+/**
+ * The manager's office on floors 1 to 3, and its en-suite.
+ *
+ * Same room as floor 4's suites, so the same layout: desk across the room with
+ * the clad wall behind it, door hung in the far corner, no cupboard because at
+ * 7 ft wide there is nowhere for one that is not in the doorway.
+ */
+function managerOffice() {
+  const back = 39.5;
+  const y = back - 3.1;
+  return {
+    name: 'MANAGER OFFICE',
+    finishes: [
+      floor(FLOOR_SOFT, 'Carpet tile: quieter than the hall outside the door, which is the point of a private office.'),
+      wall(WALL_WARM),
+      featureWall(WALL_FEATURE, 'south', 'The wall behind the desk, clad.'),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    lighting: [
+      warmLight('recessed_downlight', 6, 12, 'Even, ~350 lux.'),
+      warmLight('cove', 2, 14, 'Cove over the desk wall.'),
+    ],
+    furniture: [
+      { key: 'desk.executive.1800', label: 'Manager’s desk', position: at(32.2, y), rotationDeg: 180 },
+      { key: 'chair.executive', label: 'Manager’s chair', position: at(32.2, y - AT_EXEC), rotationDeg: 180 },
+    ],
+    rationale:
+      '73.5 sq ft, PROPOSED. Item 5 on this floor’s legend is an attached washroom beside the ' +
+      'manager’s office and neither existed in the model — the manager was a desk standing in the ' +
+      'open hall. The architect’s sheet shows one open hall on this storey, so these partitions are ' +
+      'new construction and every wall says so.',
+  };
+}
+
+function managerWash() {
+  return {
+    name: 'MANAGER WASH',
+    finishes: [
+      floor(FLOOR_WET, 'Tiled.'),
+      dado(FLOOR_WET, 1500, 'Tiled to 1,500 mm.'),
+      wall(WALL_CALM),
+      skirting(),
+    ],
+    ceiling: { kind: 'gypsum_flat', materialId: CEILING_FLAT, dropHeight: 300 },
+    lighting: [warmLight('recessed_downlight', 2, 9, 'Two, in 20 sq ft.')],
+    furniture: [],
+    rationale: '20 sq ft en-suite, PROPOSED, opening off the manager’s office. Not on the architect’s drawing.',
+  };
+}
+
 /** The mezzanine, which is one rectangle and not the L the boards draw. */
 function mezzanineSpec() {
   return {
