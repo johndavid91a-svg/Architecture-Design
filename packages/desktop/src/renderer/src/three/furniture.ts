@@ -542,6 +542,188 @@ const rug: Builder = (w, h, d, look) => {
   return group;
 };
 
+
+/**
+ * A plinth with something on it.
+ *
+ * The plinth is the easy half. What makes it read as an exhibit rather than as a
+ * packing case is the object ON it and the gap of air under that object's widest
+ * point — so the sphere sits proud of the top, not sunk into it.
+ */
+const plinth: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const body = makeMaterial(look.frame, 0.5);
+  const top = makeMaterial(look.colour, 0.3, 0.2);
+  const plinthHeight = h * 0.78;
+  // Tapered: a plinth with parallel sides is a box, and reads as one.
+  group.add(slab(w * 0.86, plinthHeight - 40, d * 0.86, 0, (plinthHeight - 40) / 2, 0, body));
+  group.add(slab(w, 40, d, 0, plinthHeight - 20, 0, top));
+  group.add(slab(w * 0.94, 30, d * 0.94, 0, 15, 0, top));
+  // The exhibit itself, as a sphere: a globe on floor 2, near enough to a
+  // massing model anywhere else, and unmistakably not more plinth.
+  const exhibit = new THREE.Mesh(
+    new THREE.SphereGeometry((Math.min(w, d) * 0.3) * MM, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0x2f6ea8, roughness: 0.35, metalness: 0.15 }),
+  );
+  exhibit.position.set(0, (plinthHeight + Math.min(w, d) * 0.3) * MM, 0);
+  exhibit.castShadow = true;
+  group.add(exhibit);
+  return group;
+};
+
+/** A terrain model set into the floor: a lipped tray with land in it. */
+const terrainModel: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const lip = makeMaterial(look.frame, 0.6);
+  const land = makeMaterial(new THREE.Color(0x4a6b3f), 0.95);
+  const water = new THREE.MeshStandardMaterial({ color: 0x2d5a7a, roughness: 0.15, metalness: 0.2 });
+  group.add(slab(w, h * 0.5, d, 0, h * 0.25, 0, lip));
+  group.add(slab(w - 160, 40, d - 160, 0, h * 0.5, 0, water));
+  // Contours, stepped: a model of ground reads as ground because it is not flat.
+  for (let i = 0; i < 4; i++) {
+    const k = 1 - i * 0.19;
+    group.add(slab((w - 260) * k, 55, (d - 260) * k, w * 0.04 * i, h * 0.5 + 30 + i * 45, -d * 0.03 * i, land));
+  }
+  return group;
+};
+
+/** A curved bank of operator positions, as a control room has. */
+const console3: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const top = makeMaterial(look.colour, 0.4);
+  const frame = makeMaterial(look.frame, 0.4, 0.4);
+  const screenMat = new THREE.MeshStandardMaterial({
+    color: 0x8fd0ff,
+    emissive: 0x2c7fbf,
+    emissiveIntensity: 0.8,
+    roughness: 0.2,
+  });
+  // Three desk segments swung round a shallow arc.
+  const segments = 3;
+  for (let i = 0; i < segments; i++) {
+    const t = (i - (segments - 1) / 2) / segments;
+    const angle = t * 0.7;
+    const seg = slab(w / segments - 40, 40, d * 0.55, 0, h - 20, 0, top);
+    seg.rotation.y = -angle;
+    seg.position.set(Math.sin(angle) * w * 0.34 * MM, (h - 20) * MM, (Math.cos(angle) - 1) * d * 0.5 * MM);
+    group.add(seg);
+    const leg = slab(w / segments - 200, h - 60, 60, 0, 0, 0, frame);
+    leg.rotation.y = -angle;
+    leg.position.set(Math.sin(angle) * w * 0.34 * MM, ((h - 60) / 2) * MM, (Math.cos(angle) - 1) * d * 0.5 * MM);
+    group.add(leg);
+    // Monitors, which is what a monitoring console is for.
+    const mon = slab(w / segments - 260, 420, 40, 0, 0, 0, screenMat);
+    mon.rotation.y = -angle;
+    mon.position.set(
+      Math.sin(angle) * w * 0.34 * MM,
+      (h + 220) * MM,
+      ((Math.cos(angle) - 1) * d * 0.5 - d * 0.24) * MM,
+    );
+    group.add(mon);
+  }
+  return group;
+};
+
+/** A tall plant cabinet: UPS or CRAC. Louvred, because both are. */
+const plantCabinet: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const body = makeMaterial(look.colour, 0.45, 0.35);
+  const louvre = makeMaterial(new THREE.Color(0x14181c), 0.9);
+  group.add(slab(w, h, d, 0, h / 2, 0, body));
+  const bands = Math.max(3, Math.floor(h / 500));
+  for (let i = 0; i < bands; i++) {
+    group.add(slab(w - 140, 180, 14, 0, 260 + (i * (h - 500)) / Math.max(1, bands - 1), d / 2 + 8, louvre));
+  }
+  // A plinth, so it does not appear to float on the finished floor.
+  group.add(slab(w + 60, 80, d + 60, 0, 40, 0, makeMaterial(look.frame, 0.7)));
+  return group;
+};
+
+/**
+ * One bay of tensile shade.
+ *
+ * Four legs and a sagging fabric top. The sag is the whole point: a flat plane
+ * on posts reads as a carport, and the reference photographs are all of fabric.
+ */
+const pergola: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const post = makeMaterial(look.frame, 0.5, 0.4);
+  const fabric = new THREE.MeshStandardMaterial({
+    color: look.colour,
+    roughness: 0.85,
+    side: THREE.DoubleSide,
+  });
+  const feet: ReadonlyArray<readonly [number, number]> = [
+    [-w / 2 + 90, -d / 2 + 90],
+    [w / 2 - 90, -d / 2 + 90],
+    [-w / 2 + 90, d / 2 - 90],
+    [w / 2 - 90, d / 2 - 90],
+  ];
+  for (const [x, z] of feet) group.add(slab(90, h, 90, x, h / 2, z, post));
+  // A shallow dish, built from a grid so the sag is real geometry.
+  const n = 6;
+  const canopy = new THREE.Mesh(new THREE.PlaneGeometry(w * MM, d * MM, n, n), fabric);
+  const pos = canopy.geometry.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) / (w * MM);
+    const v = pos.getY(i) / (d * MM);
+    // Lowest in the middle, tight at the corners, like a real tensile panel.
+    pos.setZ(i, -(0.25 - u * u) * (0.25 - v * v) * 3.2);
+  }
+  pos.needsUpdate = true;
+  canopy.geometry.computeVertexNormals();
+  canopy.rotation.x = -Math.PI / 2;
+  canopy.position.y = h * MM;
+  canopy.castShadow = true;
+  group.add(canopy);
+  return group;
+};
+
+/** A long planter trough with planting standing out of it. */
+const trough: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const box = makeMaterial(look.colour, 0.8);
+  const leaf = makeMaterial(new THREE.Color(0x3f7a44), 0.95);
+  group.add(slab(w, h, d, 0, h / 2, 0, box));
+  const clumps = Math.max(2, Math.round(w / 700));
+  for (let i = 0; i < clumps; i++) {
+    const cx = -w / 2 + ((i + 0.5) * w) / clumps;
+    const bush = new THREE.Mesh(new THREE.SphereGeometry(d * 0.34 * MM, 8, 6), leaf);
+    bush.position.set(cx * MM, (h + d * 0.24) * MM, 0);
+    bush.scale.set(1, 0.8, 1);
+    bush.castShadow = true;
+    group.add(bush);
+  }
+  return group;
+};
+
+/**
+ * A PV module on its tilt frame.
+ *
+ * Drawn tilted because a flat blue rectangle on a roof reads as a puddle. The
+ * tilt is what makes it obviously a panel from any angle.
+ */
+const solarPanel: Builder = (w, h, d, look) => {
+  const group = new THREE.Group();
+  const frame = makeMaterial(new THREE.Color(0x9aa3ad), 0.35, 0.7);
+  const cells = new THREE.MeshStandardMaterial({
+    color: look.colour,
+    roughness: 0.18,
+    metalness: 0.45,
+  });
+  const tilt = 0.35;
+  const legBack = 700;
+  group.add(slab(90, 200, 90, -w / 2 + 80, 100, d / 2 - 60, frame));
+  group.add(slab(90, 200, 90, w / 2 - 80, 100, d / 2 - 60, frame));
+  group.add(slab(90, legBack, 90, -w / 2 + 80, legBack / 2, -d / 2 + 60, frame));
+  group.add(slab(90, legBack, 90, w / 2 - 80, legBack / 2, -d / 2 + 60, frame));
+  const panel = slab(w, Math.max(40, h), d, 0, 0, 0, cells);
+  panel.rotation.x = tilt;
+  panel.position.set(0, (200 + legBack) / 2 * MM, 0);
+  group.add(panel);
+  return group;
+};
+
 /**
  * Which builder suits a catalogue key.
  *
@@ -570,7 +752,15 @@ const BUILDERS: ReadonlyArray<readonly [RegExp, Builder]> = [
   [/^storage\.shoe/, shoeRack],
   [/^storage\./, cabinet],
   [/^display\./, screen],
+  [/^exhibit\.model/, terrainModel],
+  [/^exhibit\./, plinth],
+  // Narrower than `^equipment\.`, so each must be read before it.
+  [/^equipment\.console/, console3],
+  [/^equipment\.ups|^equipment\.crac/, plantCabinet],
   [/^equipment\./, rack],
+  [/^outdoor\.pergola/, pergola],
+  [/^outdoor\.planter/, trough],
+  [/^outdoor\.solar/, solarPanel],
   [/^decor\.planter/, planter],
   [/^decor\.prayer|^decor\.rug/, rug],
   [/^bed\./, bed],

@@ -267,12 +267,21 @@ function storey(n) {
  */
 export function mumtyFloor() {
   const ROOMS = [
-    ['STAIRS', 'stair', 0.5, 14.5, 8 + 10 / 12, 19.25],
+    // The enclosed set, north-west to south, exactly as the mumty sheet lays it
+    // out. The tank has to start at the north edge: at y 35.5 its 12'-3" would
+    // finish at 47'-9", two feet outside a 45' building.
+    ['O/H WATER TANK', 'plant', 0.5, 0.5, 8, 12.25],
     ['EMG. STAIRS', 'stair', CORE_W, 0.5, 4 + 3 / 12, 7],
-    ['O/H WATER TANK', 'plant', 0.5, 35.5, 8, 12.25],
-    ['MACHINE', 'plant', 0.5, 8, 7.5, 6 + 4 / 12],
+    ['BATH', 'toilet', 15, 0.5, 7, 4],
     ['ROOM', 'other', 10.5, 8, 11 + 8 / 12, 8.75],
-    ['BATH', 'toilet', 15.5, 0.5, 7, 4],
+    ['STAIRS', 'stair', 0.5, 14.5, 8 + 10 / 12, 19.25],
+    ['MACHINE', 'plant', 0.5, 35.5, 7.5, 6 + 4 / 12],
+    // The open terrace, in two parts. One polygon round the enclosed boxes
+    // would be deeply concave and buy nothing; two rectangles tile the same
+    // roof, stay convex, and let the design label each for what it holds — the
+    // east is the garden and the west is where the PV goes.
+    ['ROOF', 'terrace', 22.5, 0.5, 17.5, 44],
+    ['ROOF (WEST)', 'terrace', CORE_W, 20, 12.67, 24.5],
   ];
 
   return {

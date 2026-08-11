@@ -230,7 +230,24 @@ async function schemeDesignByRoom(scheme) {
     for (const rd of fd.rooms) {
       const room = rooms.get(rd.roomId);
       if (!room) continue;
-      byRoom.set(roomSignature(room.name, room.boundary), { name: room.name, proposal: asProposal(rd) });
+      // A QUEUE per signature, not a single entry.
+      //
+      // Every storey of this tower has a room called HALL with an IDENTICAL 2D
+      // boundary — only the elevation differs, and a boundary is 2D. So the
+      // signature collides four ways, and a Map keyed on it kept the last
+      // design and served it for all four floors: the GIS floor, the imagery
+      // floor and the data centre all came out as the executive floor, which
+      // looked plausible and was completely wrong.
+      //
+      // The prompt the app sends carries the room's name and boundary and
+      // nothing else that separates them — its RoomId was minted in the
+      // renderer and this process has never seen it. What IS shared is ORDER:
+      // both sides walk floors in the same sequence, so the Nth request for a
+      // colliding signature is the Nth design for it.
+      const key = roomSignature(room.name, room.boundary);
+      const queue = byRoom.get(key);
+      if (queue) queue.push({ name: room.name, proposal: asProposal(rd) });
+      else byRoom.set(key, [{ name: room.name, proposal: asProposal(rd) }]);
     }
   }
   return { byRoom, unmatched, source: scheme.basementDesign ? schemePath : source, name: design.name };
@@ -293,7 +310,10 @@ async function main() {
           x: Number(m[1]),
           y: Number(m[2]),
         }));
-        const held = name && points.length > 0 ? schemeDesign.byRoom.get(roomSignature(name, points)) : null;
+        // Take the next design for this signature. `shift()` is what makes the
+        // Nth identical HALL get the Nth floor's design rather than the last.
+        const queue = name && points.length > 0 ? schemeDesign.byRoom.get(roomSignature(name, points)) : null;
+        const held = queue && queue.length > 0 ? queue.shift() : null;
         if (!held) {
           // Refusing beats guessing: answering with somebody else's room would
           // install a design that fits and is wrong.

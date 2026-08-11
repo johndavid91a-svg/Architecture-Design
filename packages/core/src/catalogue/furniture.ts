@@ -29,6 +29,13 @@ export type FurnitureCategory =
   | 'display'
   | 'equipment'
   | 'decor'
+  // Technical and outdoor contents. `exhibit` is a plinth or model on show —
+  // it occupies floor and is walked round, which is why it is furniture and not
+  // decor. `outdoor` is anything that lives on a roof and has to survive being
+  // rained on; keeping it apart from `seating` stops an indoor sofa being
+  // offered for a terrace.
+  | 'exhibit'
+  | 'outdoor'
   // Recreation and hospitality contents. `games` covers the tables and boards
   // that fill a lounge floor — they are contents of a room, never rooms
   // themselves. `counter` is a serving counter; calling it a reception desk
@@ -334,6 +341,99 @@ export const FURNITURE: readonly FurnitureItem[] = [
     styles: ['lounge.recreation', 'hospitality.warm'],
     placeholderColorHex: '#6d2f36',
     note: 'Laid in rows and stood on, not walked around, so the clearance is deliberately zero rather than absent — an inherited default here would reserve floor that a prayer hall needs for the next row.',
+  },
+  {
+    key: 'exhibit.plinth.1200',
+    name: 'Display plinth 1200',
+    category: 'exhibit',
+    width: 1200,
+    depth: 1200,
+    height: 900,
+    clearanceFront: 900,
+    styles: ['technical.workstation', 'contemporary.office'],
+    placeholderColorHex: '#2a2f36',
+    note: 'Carries the globe, the satellite model and the terrain model. The clearance is all round in use, not just in front — a plinth is walked round — but the validator only grows the front face, so the layout has to hold the other three sides by hand.',
+  },
+  {
+    key: 'exhibit.model.terrain',
+    name: 'Terrain / GIS model, sunken',
+    category: 'exhibit',
+    width: 2400,
+    depth: 2400,
+    height: 450,
+    clearanceFront: 900,
+    styles: ['technical.workstation'],
+    placeholderColorHex: '#3f5a3a',
+    note: 'A built-in, not a table: it is set into the floor build-up, so its 450 mm is a raised lip rather than a leg height. Moving it later is a builder’s job, which is why it is placed against the structure and not in the middle of a circulation route.',
+  },
+  {
+    key: 'equipment.console.monitoring',
+    name: 'Monitoring console, curved',
+    category: 'equipment',
+    width: 3600,
+    depth: 1400,
+    height: 750,
+    clearanceFront: 1200,
+    styles: ['technical.workstation'],
+    placeholderColorHex: '#23272e',
+    note: 'Three operator positions on a curve. The 1,200 mm clearance is the chair run behind it, which is deeper than a desk needs because the operators sit back to a wall of screens.',
+  },
+  {
+    key: 'equipment.ups.cabinet',
+    name: 'UPS and battery cabinet',
+    category: 'equipment',
+    width: 1600,
+    depth: 800,
+    height: 2000,
+    clearanceFront: 1000,
+    styles: ['technical.workstation'],
+    placeholderColorHex: '#4a4f55',
+    note: 'Working space in front is for switchgear access. Battery ventilation and the fire strategy are MEP questions this catalogue does not answer.',
+  },
+  {
+    key: 'equipment.crac.unit',
+    name: 'Precision cooling unit (CRAC)',
+    category: 'equipment',
+    width: 1400,
+    depth: 900,
+    height: 2000,
+    clearanceFront: 1000,
+    styles: ['technical.workstation'],
+    placeholderColorHex: '#5a6069',
+    note: 'The indoor half only. Its condenser stands outside and is a separate item; a CRAC drawn without one is the commonest way a data centre layout looks finished and is not.',
+  },
+  {
+    key: 'outdoor.pergola.4x4',
+    name: 'Shade canopy bay, 4 m x 4 m',
+    category: 'outdoor',
+    width: 4000,
+    depth: 4000,
+    height: 2600,
+    styles: ['hospitality.warm'],
+    placeholderColorHex: '#e8e3d8',
+    note: 'One bay of tensile shade on four legs. No clearance: you walk under it, and reserving floor round a canopy would delete the terrace it exists to make usable.',
+  },
+  {
+    key: 'outdoor.planter.trough',
+    name: 'Planter trough 1800',
+    category: 'outdoor',
+    width: 1800,
+    depth: 600,
+    height: 700,
+    styles: ['hospitality.warm'],
+    placeholderColorHex: '#6b5a48',
+    note: 'Run end to end to make a green edge and a guard to the parapet. Height is deliberately below the 1,050 mm a balustrade needs — it screens, it does not restrain, and it must not be relied on as protection.',
+  },
+  {
+    key: 'outdoor.solar.panel',
+    name: 'PV module, framed',
+    category: 'outdoor',
+    width: 1700,
+    depth: 1130,
+    height: 40,
+    styles: ['hospitality.warm', 'technical.workstation'],
+    placeholderColorHex: '#1b2a44',
+    note: 'One standard 60-cell module. Mounted tilted on a frame over the roof, so the plan footprint it occupies is shaded floor rather than lost floor. Output is not stated: that depends on the array, the inverter and the site, none of which are known here.',
   },
 ];
 
