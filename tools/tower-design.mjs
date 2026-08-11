@@ -63,6 +63,7 @@ const CATALOGUE = {
   'equipment.console.monitoring': { width: 3600, depth: 1400, height: 750, clearanceFront: 1200 },
   'equipment.ups.cabinet': { width: 1600, depth: 800, height: 2000, clearanceFront: 1000 },
   'equipment.crac.unit': { width: 1400, depth: 900, height: 2000, clearanceFront: 1000 },
+  'equipment.condenser.roof': { width: 1300, depth: 900, height: 1500, clearanceFront: 1000 },
   'exhibit.plinth.1200': { width: 1200, depth: 1200, height: 900, clearanceFront: 900 },
   'exhibit.model.terrain': { width: 2400, depth: 2400, height: 450, clearanceFront: 900 },
   'decor.planter.large': { width: 600, depth: 600, height: 1400 },
@@ -181,8 +182,8 @@ function coreRooms({ kitchenIsPlant }) {
       rationale: kitchenIsPlant
         ? 'Drawn as a kitchen and used as the data centre’s plant room, which is a change of use and ' +
           'not of fabric — no wall moved for it. It holds the UPS alone — both cabinets were tried here and 62 sq ft ' +
-          'will not take two, so the cooling units stand in the hall and their condensers on the ' +
-          'balcony, which is not modelled. THE COOLING AND POWER LOAD IS NOT ' +
+          'will not take two, so the cooling units stand in the hall and their ' +
+          'condensers on the roof, reached down the drawn DUCT. THE COOLING AND POWER LOAD IS NOT ' +
           'RESOLVED HERE. 62 sq ft is small for the plant a rack room of this size needs, and whether ' +
           'it is enough is an MEP question, not a layout one. Battery ventilation and the fire ' +
           'strategy are open in the same way.'
@@ -673,18 +674,39 @@ function skyGarden() {
       ],
       ceiling: { kind: 'none' },
       lighting: [warmLight('bollard', 4, 8, 'Route lighting only. Nobody sits here.')],
-      furniture: Array.from({ length: 8 }, (_, i) => ({
-        key: 'outdoor.solar.panel',
-        label: `PV module ${i + 1}`,
-        position: at(13 + (i % 2) * 6, 24 + Math.floor(i / 2) * 4.5),
-        rotationDeg: 0,
-      })),
+      furniture: [
+        // The data centre's condensers, moved up from the balcony.
+        //
+        // The balcony is 47 sq ft on a shaded south-west face, and the outdoor
+        // half of the cooling for a hall of racks needs several times that with
+        // air on every side. This strip has 310 and is already the part of the
+        // roof nothing else wants. They run down the existing DUCT the floor
+        // plans show, so no new shaft is cut.
+        ...Array.from({ length: 4 }, (_, i) => ({
+          key: 'equipment.condenser.roof',
+          label: `Condenser ${i + 1}`,
+          position: at(12.4 + (i % 2) * 5.4, 21.6 + Math.floor(i / 2) * 4.4),
+          rotationDeg: 0,
+        })),
+        ...Array.from({ length: 6 }, (_, i) => ({
+          key: 'outdoor.solar.panel',
+          label: `PV module ${i + 1}`,
+          position: at(13 + (i % 2) * 6, 31 + Math.floor(i / 2) * 4.5),
+          rotationDeg: 0,
+        })),
+      ],
       rationale:
-        'The strip west of the garden, and the right place for the array: it is the part of the roof ' +
-        'nothing else wants, behind the stair head and out of the view the terrace is there for. ' +
-        'Eight modules, tilted on frames, so the plan area they take is shaded floor rather than ' +
-        'lost floor. OUTPUT IS NOT STATED — it depends on the array, the inverter and the site, and ' +
-        'none of the three is known here. Nor is the roof loading checked.',
+        'The strip west of the garden: the part of the roof nothing else wants, behind the stair ' +
+        'head and out of the view the terrace is there for. It now carries two things.\n' +
+        'THE DATA CENTRE\'S CONDENSERS, moved up from the balcony. The balcony is 47 sq ft on a ' +
+        'shaded south-west face and it is not enough for the outdoor half of the cooling a hall of ' +
+        'racks needs; this strip is 310 and faces open sky. They drop to floor 3 down the DUCT the ' +
+        'floor plans already show, so no new shaft is cut in the structure. FOUR UNITS IS A ' +
+        'PLACEHOLDER COUNT — the real number follows the load, the load follows what goes in the ' +
+        'racks, and neither is known here. An MEP engineer sizes this.\n' +
+        'And six PV modules, tilted on frames, so the plan area they take is shaded floor rather ' +
+        'than lost floor. OUTPUT IS NOT STATED — it depends on the array, the inverter and the ' +
+        'site. Nor is the roof loading checked for either the panels or the condensers.',
     },
   ];
 }

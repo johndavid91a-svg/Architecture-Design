@@ -403,6 +403,18 @@ export const FURNITURE: readonly FurnitureItem[] = [
     note: 'The indoor half only. Its condenser stands outside and is a separate item; a CRAC drawn without one is the commonest way a data centre layout looks finished and is not.',
   },
   {
+    key: 'equipment.condenser.roof',
+    name: 'Condensing unit, roof mounted',
+    category: 'equipment',
+    width: 1300,
+    depth: 900,
+    height: 1500,
+    clearanceFront: 1000,
+    styles: ['technical.workstation'],
+    placeholderColorHex: '#8a9099',
+    note: 'The outdoor half of a precision cooling split. It needs air on all four sides and above, not just in front — the clearance field can only express one face, so the layout has to hold the rest by hand. Capacity is not stated: it depends on the load, and the load depends on what goes in the racks.',
+  },
+  {
     key: 'outdoor.pergola.4x4',
     name: 'Shade canopy bay, 4 m x 4 m',
     category: 'outdoor',

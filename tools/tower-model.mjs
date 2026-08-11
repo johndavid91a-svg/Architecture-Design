@@ -102,8 +102,24 @@ function hallBoundary() {
 const EXTERIOR_MM = Math.round(0.75 * FT); // 9"
 const PARTITION_MM = Math.round(0.375 * FT); // 4½"
 
-const CLEAR = Math.round(10.5 * FT); // 10'-6" clear under the beams
-const FLOOR_TO_FLOOR = Math.round(11.75 * FT); // 11'-9", from the level tags
+/**
+ * Heights, from the FRONT ELEVATION (page 48) rather than assumed.
+ *
+ * The elevation writes the stack out floor by floor: 11'-0" clear plus a 9"
+ * slab on floors 1 to 4, and 8'-6" clear plus a 6" slab at the mumty. Both were
+ * wrong here before — a flat 10'-6" clear, and the mumty given the same 11'-9"
+ * as a full storey.
+ *
+ * The check that says these are right: the mumty's level tag is +68'-3", and
+ * 68'-3" + 9'-0" = 77'-3", which is the total height the elevation states. The
+ * old figures put the top at 80'-0", two feet nine too tall.
+ */
+const CLEAR = Math.round(11 * FT); // 11'-0" clear, floors 1-4
+const FLOOR_TO_FLOOR = Math.round(11.75 * FT); // 11'-0" + 9" slab
+const MUMTY_CLEAR = Math.round(8.5 * FT); // 8'-6"
+const MUMTY_FLOOR_TO_FLOOR = Math.round(9 * FT); // 8'-6" + 6" slab
+/** Top of the building above road level, stated on the elevation. */
+export const TOTAL_HEIGHT_FT = 77.25;
 
 const DRAWN = 'From the architect’s drawing. Unchanged.';
 const PROPOSED = 'Proposed partition. New construction, not on the architect’s drawing.';
@@ -369,15 +385,15 @@ export function mumtyFloor() {
     name: 'Mumty',
     level: 5,
     elevation: Math.round(LEVELS.mumty * FT),
-    floorToFloor: FLOOR_TO_FLOOR,
-    clearHeight: CLEAR,
+    floorToFloor: MUMTY_FLOOR_TO_FLOOR,
+    clearHeight: MUMTY_CLEAR,
     confidence: 'extracted',
     purpose: 'Executive Sky Garden & Tea Lounge',
     rooms: ROOMS.map(([name, use, x, y, w, d]) => ({
       name,
       use,
       boundary: rect(x, y, w, d),
-      clearHeight: CLEAR,
+      clearHeight: MUMTY_CLEAR,
       confidence: 'extracted',
       note: DRAWN,
     })),

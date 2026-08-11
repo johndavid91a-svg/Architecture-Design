@@ -756,7 +756,7 @@ const BUILDERS: ReadonlyArray<readonly [RegExp, Builder]> = [
   [/^exhibit\./, plinth],
   // Narrower than `^equipment\.`, so each must be read before it.
   [/^equipment\.console/, console3],
-  [/^equipment\.ups|^equipment\.crac/, plantCabinet],
+  [/^equipment\.ups|^equipment\.crac|^equipment\.condenser/, plantCabinet],
   [/^equipment\./, rack],
   [/^outdoor\.pergola/, pergola],
   [/^outdoor\.planter/, trough],
